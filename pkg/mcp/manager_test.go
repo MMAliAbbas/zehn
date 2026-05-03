@@ -141,6 +141,27 @@ func TestLoadEnvFileNotFound(t *testing.T) {
 	}
 }
 
+func TestExpandHeaderValues(t *testing.T) {
+	t.Setenv("YAAD_AGENT_TOKEN", "token-from-env")
+
+	headers := map[string]string{
+		"Authorization": "Bearer ${YAAD_AGENT_TOKEN}",
+		"X-Static":      "unchanged",
+	}
+
+	got := expandHeaderValues(headers)
+
+	if got["Authorization"] != "Bearer token-from-env" {
+		t.Fatalf("Authorization header = %q, want env-expanded value", got["Authorization"])
+	}
+	if got["X-Static"] != "unchanged" {
+		t.Fatalf("X-Static header = %q, want unchanged", got["X-Static"])
+	}
+	if headers["Authorization"] != "Bearer ${YAAD_AGENT_TOKEN}" {
+		t.Fatalf("expandHeaderValues mutated original headers")
+	}
+}
+
 func TestExpandHomeCommandPath(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

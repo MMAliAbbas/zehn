@@ -25,6 +25,18 @@ type headerTransport struct {
 	headers map[string]string
 }
 
+func expandHeaderValues(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return headers
+	}
+
+	expanded := make(map[string]string, len(headers))
+	for key, value := range headers {
+		expanded[key] = os.ExpandEnv(value)
+	}
+	return expanded
+}
+
 func expandHomeCommandPath(command string) string {
 	if command == "" || command[0] != '~' {
 		return command
@@ -347,7 +359,7 @@ func connectServer(
 			sseTransport.HTTPClient = &http.Client{
 				Transport: &headerTransport{
 					base:    http.DefaultTransport,
-					headers: cfg.Headers,
+					headers: expandHeaderValues(cfg.Headers),
 				},
 			}
 			logger.DebugCF("mcp", "Added custom HTTP headers",

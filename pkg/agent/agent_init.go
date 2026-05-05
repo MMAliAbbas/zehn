@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/agent/interfaces"
@@ -56,10 +57,14 @@ func NewAgentLoop(
 	}
 
 	al := &AgentLoop{
-		bus:         msgBus,
-		cfg:         cfg,
-		registry:    registry,
-		state:       stateManager,
+		bus:      msgBus,
+		cfg:      cfg,
+		registry: registry,
+		state:    stateManager,
+		delegationRecords: NewDelegationRecordStore(
+			defaultDelegationRecordStoreDir(cfg),
+			delegationRecordRedactor(cfg),
+		),
 		eventBus:    eventBus,
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
@@ -75,6 +80,22 @@ func NewAgentLoop(
 	registerSharedTools(al, cfg, msgBus, registry, provider)
 
 	return al
+}
+
+func defaultDelegationRecordStoreDir(cfg *config.Config) string {
+	if cfg != nil {
+		if workspace := cfg.WorkspacePath(); workspace != "" {
+			return filepath.Join(workspace, "delegations")
+		}
+	}
+	return filepath.Join(config.GetHome(), "delegations")
+}
+
+func delegationRecordRedactor(cfg *config.Config) func(string) string {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.SensitiveDataReplacer().Replace
 }
 
 func registerSharedTools(

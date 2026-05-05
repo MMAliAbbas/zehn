@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/routing"
@@ -21,21 +22,29 @@ var (
 // agent to another. It is intentionally source-level: public tools and durable
 // queues can wrap it without overloading the existing spawn/subagent behavior.
 type AgentDelegationRequest struct {
-	ParentAgentID string
-	TargetAgentID string
-	Task          string
-	ThreadKey     string
+	ParentAgentID    string
+	TargetAgentID    string
+	Task             string
+	ThreadKey        string
+	Mode             string
+	Priority         string
+	DueAt            *time.Time
+	RequestedBy      string
+	ApprovalRequired bool
+	ArtifactRefs     []string
 }
 
 // AgentDelegationResult is the synchronous outcome of a delegated target-agent
 // turn.
 type AgentDelegationResult struct {
+	DelegationID  string
 	ParentAgentID string
 	TargetAgentID string
 	SessionKey    string
 	SessionScope  *session.SessionScope
 	Content       string
 	Status        TurnEndStatus
+	ArtifactRefs  []string
 }
 
 // RunAgentDelegation runs req.Task through the real configured target
@@ -60,23 +69,41 @@ func (al *AgentLoop) RunAgentDelegation(
 			ErrAgentDelegationInvalidRequest,
 		)
 	}
+	req.ParentAgentID = parentAgentID
+	req.TargetAgentID = targetAgentID
+	req.Task = task
+
+	record, err := al.delegationRecords.Requested(ctx, req)
+	if err != nil {
+		return AgentDelegationResult{}, err
+	}
+	result := AgentDelegationResult{
+		DelegationID:  record.DelegationID,
+		ParentAgentID: parentAgentID,
+		TargetAgentID: targetAgentID,
+		ArtifactRefs:  compactDelegationRefs(req.ArtifactRefs),
+	}
 
 	if !al.registry.CanSpawnSubagent(parentAgentID, targetAgentID) {
-		return AgentDelegationResult{}, fmt.Errorf(
+		err := fmt.Errorf(
 			"%w: parent %q cannot delegate to target %q",
 			ErrAgentDelegationPermissionDenied,
 			parentAgentID,
 			targetAgentID,
 		)
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		return result, err
 	}
 
 	target, ok := al.registry.GetAgent(targetAgentID)
 	if !ok || target == nil {
-		return AgentDelegationResult{}, fmt.Errorf(
+		err := fmt.Errorf(
 			"%w: target agent %q is not registered",
 			ErrAgentDelegationTargetNotFound,
 			targetAgentID,
 		)
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		return result, err
 	}
 
 	scope := buildDelegationSessionScope(parentAgentID, targetAgentID, req.ThreadKey)
@@ -113,6 +140,9 @@ func (al *AgentLoop) RunAgentDelegation(
 	}
 
 	ensureSessionMetadata(target.Sessions, sessionKey, &scope, []string{alias})
+	if err := al.delegationRecords.Running(ctx, record.DelegationID); err != nil {
+		return result, err
+	}
 
 	turnScope := al.newTurnEventScope(
 		target.ID,
@@ -122,15 +152,15 @@ func (al *AgentLoop) RunAgentDelegation(
 	ts := newTurnState(target, opts, turnScope)
 	pipeline := NewPipeline(al)
 	turnRes, err := al.runTurn(ctx, ts, pipeline)
-	result := AgentDelegationResult{
-		ParentAgentID: parentAgentID,
-		TargetAgentID: targetAgentID,
-		SessionKey:    sessionKey,
-		SessionScope:  session.CloneScope(&scope),
-		Content:       turnRes.finalContent,
-		Status:        turnRes.status,
-	}
+	result.SessionKey = sessionKey
+	result.SessionScope = session.CloneScope(&scope)
+	result.Content = turnRes.finalContent
+	result.Status = turnRes.status
 	if err != nil {
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		return result, err
+	}
+	if err := al.delegationRecords.Completed(ctx, record.DelegationID, result); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -158,4 +188,15 @@ func buildDelegationSessionValue(parentAgentID, targetAgentID, threadKey string)
 		threadKey = "default"
 	}
 	return fmt.Sprintf("%s:%s:%s", parentAgentID, targetAgentID, threadKey)
+}
+
+func compactDelegationRefs(refs []string) []string {
+	values := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			values = append(values, ref)
+		}
+	}
+	return values
 }

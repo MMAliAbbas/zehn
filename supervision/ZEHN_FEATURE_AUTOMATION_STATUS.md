@@ -1,6 +1,6 @@
 # Zehn Feature Automation Status
 
-Updated: 2026-05-06T04:35:48+05:00
+Updated: 2026-05-06T04:43:43+05:00
 
 This ledger is host-runner owned. A task is green only after its verification commands pass and related changes are reviewed according to the Zehn feature automation process.
 
@@ -24,9 +24,10 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 014-idempotent-yaad-delegation-memory | green | `manual-014-race-cleanup-20260506042000` | host verified after async test cleanup fix |
 | 015-meeting-v1-label-and-v2-debate-design | green | `runner-015-meeting-v1-label-and-v2-debate-design-20260506041537.log` | host verified |
 | 016-async-github-artifact-publisher | green | `runner-016-async-github-artifact-publisher-20260506042728.log` | host verified |
+| 017-staged-local-live-verification | green | `runner-017-staged-local-live-verification-20260506044050.log` | host verified |
 
-Total green: 16 / 17
+Total green: 17 / 17
 
 ## Not Green In This Ledger
 
-`017-staged-local-live-verification`
+All Zehn feature tasks have host-runner green evidence.

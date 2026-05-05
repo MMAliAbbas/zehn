@@ -792,6 +792,16 @@ func TestDefaultConfig_ToolFeedbackDisabled(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_DelegateToolDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Tools.Delegate.Enabled {
+		t.Fatal("DefaultConfig().Tools.Delegate.Enabled should be false")
+	}
+	if cfg.Tools.IsToolEnabled("delegate_to_agent") {
+		t.Fatal("delegate_to_agent should be disabled unless explicitly enabled")
+	}
+}
+
 func TestLoadConfig_ToolFeedbackDefaultsFalseWhenUnset(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")

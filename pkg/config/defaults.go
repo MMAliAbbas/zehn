@@ -412,6 +412,9 @@ func DefaultConfig() *Config {
 			AppendFile: ToolConfig{
 				Enabled: true,
 			},
+			Delegate: ToolConfig{
+				Enabled: false,
+			},
 			EditFile: ToolConfig{
 				Enabled: true,
 			},

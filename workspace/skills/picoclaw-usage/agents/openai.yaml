@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoClaw Usage"
+  short_description: "Set up and operate PicoClaw as a personal always-on assistant"
+

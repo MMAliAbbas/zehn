@@ -1,0 +1,3 @@
+interface:
+  display_name: "PicoClaw Project"
+  short_description: "PicoClaw/Zehn setup, configuration, audits, and upstream work"

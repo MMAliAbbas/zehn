@@ -194,6 +194,53 @@ func TestNewAgentLoop_RegistersWebSearchTool_WhenExplicitProviderUnavailable(t *
 	}
 }
 
+func TestNewAgentLoop_RegistersDelegateToolOnlyWhenEnabled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:      "ceo",
+			Default: true,
+			Subagents: &config.SubagentsConfig{
+				AllowAgents: []string{"ciso"},
+			},
+		},
+		{ID: "ciso"},
+	}
+
+	cfg.Tools.Delegate.Enabled = false
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	ceo, ok := al.registry.GetAgent("ceo")
+	if !ok {
+		t.Fatal("expected ceo agent")
+	}
+	if _, ok := ceo.Tools.Get("delegate_to_agent"); ok {
+		t.Fatal("delegate_to_agent should not be registered when disabled")
+	}
+
+	cfg.Tools.Delegate.Enabled = true
+	al = NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	ceo, ok = al.registry.GetAgent("ceo")
+	if !ok {
+		t.Fatal("expected ceo agent")
+	}
+	delegateTool, ok := ceo.Tools.Get("delegate_to_agent")
+	if !ok {
+		t.Fatal("delegate_to_agent should be registered when enabled")
+	}
+
+	result := delegateTool.Execute(context.Background(), map[string]any{
+		"agent_id": "cto",
+		"task":     "review risk",
+	})
+	if !result.IsError {
+		t.Fatal("expected allowlist denial for cto")
+	}
+	if !strings.Contains(result.ForLLM, "not allowed to delegate to agent") {
+		t.Fatalf("ForLLM = %q", result.ForLLM)
+	}
+}
+
 func TestNewAgentLoop_DoesNotRegisterWebSearchTool_WhenNoReadyProviders(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = t.TempDir()

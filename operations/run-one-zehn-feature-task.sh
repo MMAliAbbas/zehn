@@ -415,6 +415,10 @@ commit_changes() {
 
   for item in "${allowed[@]}"; do
     item="${item%/}"
+    if git -C "$ROOT" check-ignore -q -- "$item"; then
+      log "skipping ignored allowed path during auto-stage: $item"
+      continue
+    fi
     case "$item" in
       */**)
         prefix="${item%/**}"

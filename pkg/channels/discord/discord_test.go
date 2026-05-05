@@ -16,6 +16,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/audio/tts"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 type stubTTSProvider struct{}
@@ -100,6 +101,30 @@ func TestApplyDiscordProxy_FromEnvironment(t *testing.T) {
 	}
 	if gotURL.String() != wantURL.String() {
 		t.Fatalf("WS proxy = %q, want %q", gotURL.String(), wantURL.String())
+	}
+}
+
+func TestHandleMessage_IgnoresSelfAuthoredMessages(t *testing.T) {
+	msgBus := bus.NewMessageBus()
+	ch := &DiscordChannel{
+		BaseChannel: channels.NewBaseChannel("discord", &config.DiscordSettings{}, msgBus, []string{"*"}),
+		ctx:         context.Background(),
+		botUserID:   "bot-user",
+	}
+	session := &discordgo.Session{State: discordgo.NewState()}
+	session.State.User = &discordgo.User{ID: "bot-user"}
+
+	ch.handleMessage(session, &discordgo.MessageCreate{Message: &discordgo.Message{
+		ID:        "msg-1",
+		ChannelID: "channel-1",
+		Content:   "visibility summary from bot",
+		Author:    &discordgo.User{ID: "bot-user", Username: "picoclaw"},
+	}})
+
+	select {
+	case msg := <-msgBus.InboundChan():
+		t.Fatalf("self-authored Discord message was re-ingested: %#v", msg)
+	default:
 	}
 }
 

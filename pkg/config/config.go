@@ -372,9 +372,16 @@ type FeishuSettings struct {
 }
 
 type DiscordSettings struct {
-	Token       SecureString `json:"token,omitzero" yaml:"token,omitempty" env:"PICOCLAW_CHANNELS_DISCORD_TOKEN"`
-	Proxy       string       `json:"proxy"          yaml:"-"               env:"PICOCLAW_CHANNELS_DISCORD_PROXY"`
-	MentionOnly bool         `json:"mention_only"   yaml:"-"               env:"PICOCLAW_CHANNELS_DISCORD_MENTION_ONLY"`
+	Token               SecureString                     `json:"token,omitzero"         yaml:"token,omitempty" env:"PICOCLAW_CHANNELS_DISCORD_TOKEN"`
+	Proxy               string                           `json:"proxy"                  yaml:"-"               env:"PICOCLAW_CHANNELS_DISCORD_PROXY"`
+	MentionOnly         bool                             `json:"mention_only"           yaml:"-"               env:"PICOCLAW_CHANNELS_DISCORD_MENTION_ONLY"`
+	VisibilitySummaries DiscordVisibilitySummariesConfig `json:"visibility_summaries"   yaml:"-"`
+}
+
+type DiscordVisibilitySummariesConfig struct {
+	Enabled bool                `json:"enabled" yaml:"-" env:"PICOCLAW_CHANNELS_DISCORD_VISIBILITY_SUMMARIES_ENABLED"`
+	ChatID  string              `json:"chat_id" yaml:"-" env:"PICOCLAW_CHANNELS_DISCORD_VISIBILITY_SUMMARIES_CHAT_ID"`
+	Events  FlexibleStringSlice `json:"events"  yaml:"-" env:"PICOCLAW_CHANNELS_DISCORD_VISIBILITY_SUMMARIES_EVENTS"`
 }
 
 type MaixCamSettings struct {

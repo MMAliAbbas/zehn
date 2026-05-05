@@ -240,6 +240,73 @@ func TestRunAgentDelegationAsync_ReturnsIDAndPersistsCompletedResult(t *testing.
 	}
 }
 
+func TestRunAgentDelegation_PublishesDiscordVisibilitySummariesWhenEnabled(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	cfg.Channels = discordVisibilityChannels(t, true)
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &recordingDelegationProvider{})
+
+	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "Review private launch transcript: raw transcript must stay private.",
+		ThreadKey:     "launch-review",
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+	if result.DelegationID == "" {
+		t.Fatal("DelegationID is empty")
+	}
+
+	messages := collectOutboundMessages(t, msgBus, 2)
+	joined := messages[0].Content + "\n" + messages[1].Content
+	for _, want := range []string{"Delegation created", "Delegation completed", result.DelegationID, "parent -> target"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("visibility summaries missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "raw transcript must stay private") || strings.Contains(joined, "target answer") {
+		t.Fatalf("visibility summaries leaked task/result content:\n%s", joined)
+	}
+	for _, msg := range messages {
+		if msg.Channel != "discord" || msg.ChatID != "visibility-channel" {
+			t.Fatalf("summary target = %s:%s, want discord:visibility-channel", msg.Channel, msg.ChatID)
+		}
+		if got := msg.Context.Raw["visibility_summary_event"]; got == "" {
+			t.Fatalf("summary missing visibility event metadata: %#v", msg.Context.Raw)
+		}
+	}
+}
+
+func TestRunAgentDelegation_DiscordVisibilitySummariesDisabledByDefault(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	cfg.Channels = discordVisibilityChannels(t, false)
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &recordingDelegationProvider{})
+
+	_, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "Review launch.",
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+
+	select {
+	case msg := <-msgBus.OutboundChan():
+		t.Fatalf("unexpected visibility summary when disabled: %#v", msg)
+	default:
+	}
+}
+
 type blockingDelegationProvider struct {
 	startOnce sync.Once
 	started   chan struct{}
@@ -295,6 +362,39 @@ func delegationConfigWithAgents(t *testing.T, agents []config.AgentConfig) *conf
 			List: agents,
 		},
 	}
+}
+
+func discordVisibilityChannels(t *testing.T, enabled bool) config.ChannelsConfig {
+	t.Helper()
+	return config.ChannelsConfig{
+		"discord": &config.Channel{
+			Enabled:   true,
+			Type:      config.ChannelDiscord,
+			AllowFrom: config.FlexibleStringSlice{"owner"},
+			Settings:  config.RawNode(`{"visibility_summaries":{"enabled":` + boolString(enabled) + `,"chat_id":"visibility-channel"}}`),
+		},
+	}
+}
+
+func boolString(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
+
+func collectOutboundMessages(t *testing.T, msgBus *bus.MessageBus, count int) []bus.OutboundMessage {
+	t.Helper()
+	out := make([]bus.OutboundMessage, 0, count)
+	for len(out) < count {
+		select {
+		case msg := <-msgBus.OutboundChan():
+			out = append(out, msg)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for outbound message %d/%d", len(out)+1, count)
+		}
+	}
+	return out
 }
 
 func messageContents(messages []providers.Message) []string {

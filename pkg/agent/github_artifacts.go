@@ -90,6 +90,7 @@ func (al *AgentLoop) maybePublishMeetingGitHubArtifact(
 	}, []string{issue.URL}); err != nil {
 		return record, err
 	}
+	al.publishIssueCreatedSummary(ctx, "meeting", record.MeetingID, issue.URL)
 	return al.meetingRecords.Get(ctx, record.MeetingID)
 }
 
@@ -122,6 +123,7 @@ func (al *AgentLoop) maybePublishDelegationGitHubArtifact(
 		IssueID:  issue.Number,
 		IssueURL: issue.URL,
 	}, []string{issue.URL})
+	al.publishIssueCreatedSummary(ctx, "delegation", record.DelegationID, issue.URL)
 	return result
 }
 

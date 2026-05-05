@@ -162,3 +162,52 @@ func TestRunAgentMeeting_DepartmentHeadCanChairOwnDomainMeeting(t *testing.T) {
 		t.Fatal("MeetingID is empty")
 	}
 }
+
+func TestRunAgentMeeting_PublishesEventBasedDiscordVisibilitySummaries(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo", "cfo"}}},
+		{ID: "cmo"},
+		{ID: "cfo"},
+	})
+	cfg.Channels = discordVisibilityChannels(t, true)
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &recordingMeetingProvider{})
+	al.SetGitHubArtifactWriter(&fakeGitHubArtifactWriter{})
+
+	result, err := al.StartAgentMeeting(context.Background(), tools.MeetingExecutionRequest{
+		Title:               "Two-week sales lift",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo", "cfo"},
+		Goal:                "Increase sales by 30% in two weeks.",
+		Approvals:           []string{"Ali approval before customer-facing discounts."},
+		Notes:               "PRIVATE_RAW_MEETING_NOTES must stay private.",
+	})
+	if err != nil {
+		t.Fatalf("StartAgentMeeting() error = %v", err)
+	}
+
+	messages := collectOutboundMessages(t, msgBus, 11)
+	contents := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		contents = append(contents, msg.Content)
+	}
+	joined := strings.Join(contents, "\n")
+	for _, want := range []string{
+		"Meeting opened",
+		"Delegation created",
+		"Recommendation ready",
+		"Approval needed",
+		"Issue created",
+		"Meeting completed",
+		result.MeetingID,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("visibility summaries missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "PRIVATE_RAW_MEETING_NOTES") || strings.Contains(joined, "CMO:") || strings.Contains(joined, "CFO:") {
+		t.Fatalf("visibility summaries leaked internal meeting material:\n%s", joined)
+	}
+}

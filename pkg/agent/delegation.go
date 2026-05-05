@@ -161,6 +161,7 @@ func (al *AgentLoop) prepareAgentDelegation(
 	if err != nil {
 		return AgentDelegationRecord{}, req, AgentDelegationResult{}, err
 	}
+	al.publishDelegationCreatedSummary(ctx, record)
 	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
 		return record, req, AgentDelegationResult{}, err
 	}
@@ -180,6 +181,7 @@ func (al *AgentLoop) prepareAgentDelegation(
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
 		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
 		return record, req, result, err
 	}
 
@@ -192,6 +194,7 @@ func (al *AgentLoop) prepareAgentDelegation(
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
 		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
 		return record, req, result, err
 	}
 	return record, req, result, nil
@@ -212,6 +215,7 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
 		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
 		return result, err
 	}
 
@@ -271,11 +275,13 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 	if err != nil {
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
 		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
 		return result, err
 	}
 	if err := al.delegationRecords.Completed(ctx, record.DelegationID, result); err != nil {
 		return result, err
 	}
+	al.publishDelegationCompletedSummary(ctx, result)
 	result = al.maybePublishDelegationGitHubArtifact(ctx, record, req, result)
 	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
 		return result, err

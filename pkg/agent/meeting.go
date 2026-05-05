@@ -77,6 +77,7 @@ func (al *AgentLoop) RunAgentMeeting(
 	if err != nil {
 		return AgentMeetingOutcome{}, AgentMeetingRecord{}, err
 	}
+	al.publishMeetingOpenedSummary(ctx, record)
 
 	turns := make([]AgentMeetingTurn, 0, len(req.ParticipantAgentIDs))
 	for _, participantID := range req.ParticipantAgentIDs {
@@ -109,6 +110,12 @@ func (al *AgentLoop) RunAgentMeeting(
 	chairResponse, err := al.runAgentMeetingChairTurn(ctx, record.MeetingID, req, turns)
 	if err != nil {
 		_ = al.meetingRecords.Failed(context.Background(), record.MeetingID, err)
+		al.publishDiscordVisibilitySummary(context.Background(), visibilityEventBlockerRaised, fmt.Sprintf(
+			"Blocker raised: meeting %s chair=%s failed: %s.",
+			record.MeetingID,
+			req.ChairAgentID,
+			visibilityCompact(err.Error(), 120),
+		))
 		return AgentMeetingOutcome{}, record, err
 	}
 	outcome := parseAgentMeetingOutcome(chairResponse)
@@ -121,10 +128,12 @@ func (al *AgentLoop) RunAgentMeeting(
 	}, outcome); err != nil {
 		return AgentMeetingOutcome{}, record, err
 	}
+	al.publishMeetingRecommendationSummary(ctx, record)
 	record, err = al.meetingRecords.Get(ctx, record.MeetingID)
 	if err != nil {
 		return AgentMeetingOutcome{}, record, err
 	}
+	al.publishMeetingCompletedSummary(ctx, record)
 	record, err = al.maybePublishMeetingGitHubArtifact(ctx, record, outcome)
 	if err != nil {
 		return AgentMeetingOutcome{}, record, err

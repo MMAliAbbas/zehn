@@ -46,7 +46,7 @@ func (t *MeetingTool) Name() string {
 }
 
 func (t *MeetingTool) Description() string {
-	return "Start a private chaired agent meeting. Participant turns are preserved in the meeting record; user-facing output is the chair's consolidated recommendation."
+	return "Start meeting v1: a private chaired sequential agent meeting. Participants are consulted one at a time, not live real-time debate; user-facing output is the chair's consolidated recommendation."
 }
 
 func (t *MeetingTool) Parameters() map[string]any {
@@ -55,7 +55,7 @@ func (t *MeetingTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"title": map[string]any{
 				"type":        "string",
-				"description": "Meeting title.",
+				"description": "Meeting v1 title.",
 			},
 			"sponsor_agent_id": map[string]any{
 				"type":        "string",
@@ -67,14 +67,14 @@ func (t *MeetingTool) Parameters() map[string]any {
 			},
 			"participant_agent_ids": map[string]any{
 				"type":        "array",
-				"description": "Configured participant agent IDs to consult privately.",
+				"description": "Configured participant agent IDs to consult privately in sequential meeting v1 turns.",
 				"items": map[string]any{
 					"type": "string",
 				},
 			},
 			"goal": map[string]any{
 				"type":        "string",
-				"description": "Meeting goal or decision to resolve.",
+				"description": "Meeting v1 goal or decision to resolve.",
 			},
 			"constraints": map[string]any{
 				"type":        "array",
@@ -85,7 +85,7 @@ func (t *MeetingTool) Parameters() map[string]any {
 			},
 			"notes": map[string]any{
 				"type":        "string",
-				"description": "Private meeting context or chair notes.",
+				"description": "Private meeting v1 context or chair notes.",
 			},
 			"approvals": map[string]any{
 				"type":        "array",
@@ -176,7 +176,7 @@ func compactStringRefsFromAny(value any) []string {
 
 func formatMeetingResultForLLM(result MeetingExecutionResult) string {
 	var sb strings.Builder
-	sb.WriteString("Agent meeting completed.")
+	sb.WriteString("Agent meeting v1 completed.")
 	sb.WriteString("\nMeeting ID: ")
 	sb.WriteString(result.MeetingID)
 	if len(result.ArtifactRefs) > 0 {

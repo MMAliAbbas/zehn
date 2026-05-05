@@ -1,7 +1,8 @@
 # Agent Delegation And Meetings
 
-This reference describes the supported private agent-to-agent delegation and
-chaired meeting workflow.
+This reference describes the supported private agent-to-agent delegation,
+meeting v1 chaired sequential workflow, and the planned meeting v2 debate
+workflow.
 
 ## Runtime Boundaries
 
@@ -39,11 +40,17 @@ GitHub issues are created only for executable or approval-tracked delegation
 work, such as async execution or `approval_required` work. Advisory exchanges do
 not create issues.
 
-## Meeting Workflow
+## Meeting V1 Workflow
 
-`start_agent_meeting` starts a private chaired meeting. The sponsor names a
-chair and participants. The chair gathers private participant turns through
-`delegate_to_agent`, then returns one consolidated recommendation.
+`start_agent_meeting` starts meeting v1: a private chaired sequential meeting.
+The sponsor names a chair and participants. The chair gathers private
+participant turns through `delegate_to_agent` one participant at a time, then
+returns one consolidated recommendation.
+
+Meeting v1 is not live real-time debate. Participants do not see each other's
+turns while those turns are being collected, and the current implementation does
+not run multi-round back-and-forth discussion. The chair sees the collected
+participant positions during synthesis and owns the final recommendation.
 
 Meeting records include:
 
@@ -56,13 +63,95 @@ Meeting records include:
 
 The tool output includes the meeting ID, artifact refs, participants,
 consolidated recommendation, timeline, risks, approval-needed text, and
-follow-ups. Raw debate and internal prompts are kept out of GitHub issues and
-Discord visibility summaries.
+follow-ups. Raw internal prompts and participant turn text are kept out of
+GitHub issues and Discord visibility summaries by default.
 
 GitHub issues are created for meetings with executable follow-ups or explicit
 approval tracking. Issue bodies contain curated meeting artifacts. Participant
 comments are added only for material positions, risks, commitments,
 dependencies, acceptance criteria, or follow-ups.
+
+## Meeting V2 Debate Design
+
+Meeting v2 should add an explicit multi-round debate loop without changing the
+meaning of meeting v1. It should be a new execution mode or versioned tool path
+so existing `start_agent_meeting` callers keep the chaired sequential behavior.
+
+Turn order:
+
+- The chair opens with the goal, constraints, decision rules, participant list,
+  maximum rounds, and per-turn budget.
+- Round 1 collects initial positions in deterministic participant order from
+  the request after normalization and de-duplication.
+- Later rounds use the same order unless the chair explicitly inserts a focused
+  intervention, such as asking Finance to respond to a margin risk.
+- The chair synthesis turn happens after the debate loop stops and remains the
+  single default user-facing recommendation.
+
+Participant visibility:
+
+- In round 1, participants receive only the meeting context, their role, and
+  chair instructions.
+- In later rounds, each participant receives a curated transcript summary of
+  prior turns, including speaker, round, position, risks, objections,
+  commitments, and open questions.
+- Participants should not receive hidden chain-of-thought, raw provider
+  messages, secrets, or unredacted private data.
+- The chair can redact or summarize sensitive prior material before it becomes
+  visible to later participants.
+
+Chair interventions:
+
+- The chair may add a short intervention between turns or rounds to narrow the
+  question, resolve ambiguity, call for evidence, ask for dissent, or stop a
+  tangent.
+- Interventions are recorded as chair turns with round number, reason, and
+  target audience.
+- Chair interventions must not silently rewrite participant positions; they can
+  summarize, challenge, or request a response.
+
+Stopping criteria:
+
+- Stop when the chair determines consensus or a clear recommendation exists.
+- Stop when the configured maximum round count is reached.
+- Stop when no participant adds material new risks, alternatives, commitments,
+  or objections in a full round.
+- Stop immediately on cancellation, policy violation, missing required approval
+  boundary, or repeated participant failure.
+- If unresolved dissent remains, the chair must include it in risks or
+  follow-ups instead of extending indefinitely.
+
+Token limits:
+
+- Each participant turn gets an explicit maximum response budget.
+- The rolling transcript is summarized before it exceeds the configured meeting
+  context budget.
+- Summaries must preserve decisions, disagreements, assumptions, risks,
+  approvals, dependencies, and follow-ups.
+- If summarization cannot fit the budget, the chair stops the debate and emits
+  a recommendation with a token-limit risk.
+
+Failure handling:
+
+- A participant failure records a failed turn with error text redacted through
+  the existing record filter.
+- The chair may continue if the failed participant is optional and the remaining
+  quorum is enough for the decision.
+- Required participant failure stops the meeting and records a failed status.
+- Repeated provider/tool failures stop the debate, preserve all completed
+  turns, and publish only a concise blocker summary to visibility channels.
+- Partial results must never be presented as complete consensus.
+
+Audit trail:
+
+- Meeting v2 records need version, mode, round count, turn order, chair
+  interventions, participant-visible summaries, raw private turn references,
+  stop reason, token-budget decisions, failures, chair synthesis, final
+  recommendation, timeline, risks, approvals, follow-ups, artifact refs, and
+  optional GitHub artifact status.
+- GitHub and Discord continue to receive curated summaries only.
+- Durable memory should store final decisions and curated summaries, not raw
+  transcript text by default.
 
 ## Zehn Sales-Growth Pattern
 

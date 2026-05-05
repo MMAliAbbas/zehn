@@ -67,6 +67,63 @@ func TestMeetingTool_Parameters(t *testing.T) {
 	}
 }
 
+func TestMeetingTool_DescriptionNamesMeetingV1SequentialFlow(t *testing.T) {
+	tool := NewMeetingTool(nil)
+
+	desc := tool.Description()
+	for _, want := range []string{"meeting v1", "chaired sequential", "not live real-time debate"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("Description() = %q, want %q", desc, want)
+		}
+	}
+
+	params := tool.Parameters()
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("properties should be a map")
+	}
+	participants, ok := props["participant_agent_ids"].(map[string]any)
+	if !ok {
+		t.Fatal("participant_agent_ids should be a map")
+	}
+	participantDesc, ok := participants["description"].(string)
+	if !ok {
+		t.Fatal("participant_agent_ids description should be a string")
+	}
+	for _, want := range []string{"sequential", "meeting v1"} {
+		if !strings.Contains(participantDesc, want) {
+			t.Fatalf("participant_agent_ids description = %q, want %q", participantDesc, want)
+		}
+	}
+}
+
+func TestFormatMeetingResultForLLMNamesMeetingV1AndPreservesSections(t *testing.T) {
+	result := MeetingExecutionResult{
+		MeetingID:      "meeting-123",
+		Recommendation: "Launch with a two-week revenue sprint.",
+		Participants:   []string{"cmo", "cfo"},
+		Timeline:       []string{"Day 1: align offer"},
+		Risks:          []string{"Discounting may weaken margin"},
+		Approvals:      []string{"Ali approval"},
+		FollowUps:      []string{"CRO owns pipeline review"},
+	}
+
+	got := formatMeetingResultForLLM(result)
+	for _, want := range []string{
+		"Agent meeting v1 completed.",
+		"Participants: cmo, cfo",
+		"Consolidated recommendation: Launch with a two-week revenue sprint.",
+		"Timeline: Day 1: align offer",
+		"Risks: Discounting may weaken margin",
+		"Approval needed: Ali approval",
+		"Follow-ups: CRO owns pipeline review",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatMeetingResultForLLM() missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestMeetingTool_Execute_StartsMeetingAndReturnsConsolidatedRecommendation(t *testing.T) {
 	runner := &recordingMeetingRunner{}
 	tool := NewMeetingTool(runner)

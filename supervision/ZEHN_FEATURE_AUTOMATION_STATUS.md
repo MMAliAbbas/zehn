@@ -1,6 +1,6 @@
 # Zehn Feature Automation Status
 
-Updated: 2026-05-06T02:24:00+05:00
+Updated: 2026-05-06T02:45:00+05:00
 
 This ledger is host-runner owned. A task is green only after its verification commands pass and related changes are reviewed according to the Zehn feature automation process.
 
@@ -20,8 +20,8 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 010-discord-visibility-summaries | green | `runner-010-discord-visibility-summaries-20260506011602.log` | host verified |
 | 011-end-to-end-delegation-meeting-verification | green | `manual-race-repair-20260506022400` | host verified after subturn/channel race repair |
 
-Total green: 11 / 11
+Total green: 11 / 17
 
 ## Not Green In This Ledger
 
-All Zehn feature tasks have host-runner green evidence.
+`012-branch-hygiene-and-runner-scoped-staging`, `013-bounded-async-delegation-executor`, `014-idempotent-yaad-delegation-memory`, `015-meeting-v1-label-and-v2-debate-design`, `016-async-github-artifact-publisher`, `017-staged-local-live-verification`

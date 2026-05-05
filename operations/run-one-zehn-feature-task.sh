@@ -361,7 +361,40 @@ commit_changes() {
     log "auto-commit disabled"
     return 0
   }
-  git -C "$ROOT" add -A
+
+  allowed=()
+  while IFS= read -r line; do
+    allowed+=("$line")
+  done < <(extract_allowed_paths)
+
+  if [ "${#allowed[@]}" -eq 0 ]; then
+    die "no allowed paths found for $TASK; refusing to auto-stage"
+  fi
+
+  for item in "${allowed[@]}"; do
+    item="${item%/}"
+    case "$item" in
+      */**)
+        prefix="${item%/**}"
+        git -C "$ROOT" add -- "$prefix" || return 1
+        ;;
+      *\*)
+        matches=()
+        while IFS= read -r path; do
+          matches+=("$path")
+        done < <(git -C "$ROOT" ls-files --modified --others --exclude-standard -- "$item")
+        if [ "${#matches[@]}" -gt 0 ]; then
+          git -C "$ROOT" add -- "${matches[@]}" || return 1
+        fi
+        ;;
+      *)
+        if [ -e "$ROOT/$item" ] || git -C "$ROOT" ls-files --error-unmatch "$item" >/dev/null 2>&1; then
+          git -C "$ROOT" add -- "$item" || return 1
+        fi
+        ;;
+    esac
+  done
+
   if git -C "$ROOT" diff --cached --quiet; then
     log "nothing staged"
     return 0

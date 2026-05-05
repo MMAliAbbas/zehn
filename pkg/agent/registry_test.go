@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -94,6 +96,61 @@ func TestAgentRegistry_GetAgent_Normalize(t *testing.T) {
 	}
 	if agent.ID != "my-agent" {
 		t.Errorf("agent.ID = %q, want 'my-agent'", agent.ID)
+	}
+}
+
+func TestAgentRegistry_ListAgentDescriptorsDeterministic(t *testing.T) {
+	tmpDir := t.TempDir()
+	salesWorkspace := filepath.Join(tmpDir, "sales-workspace")
+	supportWorkspace := filepath.Join(tmpDir, "support-workspace")
+	if err := os.MkdirAll(salesWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(supportWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(supportWorkspace, "AGENT.md"), []byte(`---
+name: Support Desk
+description: Handles customer support requests.
+---
+# Support
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "support", Workspace: supportWorkspace},
+		{ID: "sales", Name: "Sales Bot", Workspace: salesWorkspace},
+	})
+	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
+
+	got := registry.ListAgentDescriptors()
+	want := []AgentDescriptor{
+		{ID: "sales", Name: "Sales Bot", Description: "Workspace: sales-workspace"},
+		{ID: "support", Name: "Support Desk", Description: "Handles customer support requests."},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ListAgentDescriptors() len = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ListAgentDescriptors()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestAgentRegistry_GetAgentDescriptorNormalizesID(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "reviewer", Name: "Reviewer"},
+	})
+	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
+
+	got, ok := registry.GetAgentDescriptor("Reviewer")
+	if !ok {
+		t.Fatal("GetAgentDescriptor() ok = false, want true")
+	}
+	if got.ID != "reviewer" || got.Name != "Reviewer" {
+		t.Fatalf("GetAgentDescriptor() = %+v, want reviewer descriptor", got)
 	}
 }
 

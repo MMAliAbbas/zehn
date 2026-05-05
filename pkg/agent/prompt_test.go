@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 func TestPromptRegistry_RejectsRegisteredSourceWrongPlacement(t *testing.T) {
@@ -194,6 +196,79 @@ func TestContextBuilder_CollectsToolDiscoveryContributor(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("system parts missing tool discovery prompt metadata")
+	}
+}
+
+func TestAgentDiscoveryPromptContributorOmitsSingleAgentSetup(t *testing.T) {
+	contributor := agentDiscoveryPromptContributor{
+		selfID: "main",
+		descriptors: []AgentDescriptor{
+			{ID: "main", Name: "Main", Description: "Primary agent."},
+		},
+	}
+
+	parts, err := contributor.ContributePrompt(context.Background(), PromptBuildRequest{})
+	if err != nil {
+		t.Fatalf("ContributePrompt() error = %v", err)
+	}
+	if len(parts) != 0 {
+		t.Fatalf("ContributePrompt() len = %d, want 0: %+v", len(parts), parts)
+	}
+}
+
+func TestAgentDiscoveryPromptContributorListsPeers(t *testing.T) {
+	contributor := agentDiscoveryPromptContributor{
+		selfID: "planner",
+		descriptors: []AgentDescriptor{
+			{ID: "research", Name: "Research", Description: "Finds source material."},
+			{ID: "planner", Name: "Planner", Description: "Plans the work."},
+			{ID: "review", Name: "Review", Description: "Reviews output."},
+		},
+	}
+
+	parts, err := contributor.ContributePrompt(context.Background(), PromptBuildRequest{})
+	if err != nil {
+		t.Fatalf("ContributePrompt() error = %v", err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("ContributePrompt() len = %d, want 1: %+v", len(parts), parts)
+	}
+	content := parts[0].Content
+	if strings.Contains(content, "`planner`") {
+		t.Fatalf("discovery prompt should omit self, got %q", content)
+	}
+	researchLine := "- `research` (Research): Finds source material."
+	reviewLine := "- `review` (Review): Reviews output."
+	if !strings.Contains(content, researchLine) || !strings.Contains(content, reviewLine) {
+		t.Fatalf("discovery prompt missing peer lines, got %q", content)
+	}
+	if strings.Index(content, researchLine) > strings.Index(content, reviewLine) {
+		t.Fatalf("discovery prompt order is not deterministic by id: %q", content)
+	}
+}
+
+func TestNewAgentRegistryInjectsDiscoveryPromptForMultiAgentSetups(t *testing.T) {
+	t.Setenv("PICOCLAW_BUILTIN_SKILLS", t.TempDir())
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "planner", Name: "Planner"},
+		{ID: "research", Name: "Research"},
+	})
+	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
+
+	planner, ok := registry.GetAgent("planner")
+	if !ok {
+		t.Fatal("expected planner agent")
+	}
+	messages := planner.ContextBuilder.BuildMessagesFromPrompt(PromptBuildRequest{CurrentMessage: "hello"})
+	system := messages[0]
+	if !strings.Contains(system.Content, "# Peer Agents") {
+		t.Fatalf("system prompt missing peer discovery section: %q", system.Content)
+	}
+	if !strings.Contains(system.Content, "`research` (Research)") {
+		t.Fatalf("system prompt missing research peer: %q", system.Content)
+	}
+	if strings.Contains(system.Content, "`planner` (Planner)") {
+		t.Fatalf("system prompt should omit self descriptor: %q", system.Content)
 	}
 }
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -38,6 +39,70 @@ func (c toolDiscoveryPromptContributor) ContributePrompt(
 			Source:  PromptSource{ID: PromptSourceToolDiscovery, Name: "tool_registry:discovery"},
 			Title:   "tool discovery",
 			Content: content,
+			Stable:  true,
+			Cache:   PromptCacheEphemeral,
+		},
+	}, nil
+}
+
+type agentDiscoveryPromptContributor struct {
+	selfID      string
+	descriptors []AgentDescriptor
+}
+
+func (c agentDiscoveryPromptContributor) PromptSource() PromptSourceDescriptor {
+	return PromptSourceDescriptor{
+		ID:              PromptSourceAgentDiscovery,
+		Owner:           "agent",
+		Description:     "Configured peer agent descriptors",
+		Allowed:         []PromptPlacement{{Layer: PromptLayerCapability, Slot: PromptSlotTooling}},
+		StableByDefault: true,
+	}
+}
+
+func (c agentDiscoveryPromptContributor) ContributePrompt(
+	_ context.Context,
+	_ PromptBuildRequest,
+) ([]PromptPart, error) {
+	if len(c.descriptors) <= 1 {
+		return nil, nil
+	}
+
+	selfID := strings.TrimSpace(c.selfID)
+	peers := append([]AgentDescriptor(nil), c.descriptors...)
+	slices.SortFunc(peers, func(a, b AgentDescriptor) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	var sb strings.Builder
+	sb.WriteString("# Peer Agents\n\n")
+	sb.WriteString("Configured peer agents available for collaboration:\n")
+	count := 0
+	for _, descriptor := range peers {
+		if descriptor.ID == "" || descriptor.ID == selfID {
+			continue
+		}
+		fmt.Fprintf(
+			&sb,
+			"- `%s` (%s): %s\n",
+			descriptor.ID,
+			descriptor.Name,
+			descriptor.Description,
+		)
+		count++
+	}
+	if count == 0 {
+		return nil, nil
+	}
+
+	return []PromptPart{
+		{
+			ID:      "capability.agent_discovery",
+			Layer:   PromptLayerCapability,
+			Slot:    PromptSlotTooling,
+			Source:  PromptSource{ID: PromptSourceAgentDiscovery, Name: "agent:discovery"},
+			Title:   "peer agents",
+			Content: strings.TrimSpace(sb.String()),
 			Stable:  true,
 			Cache:   PromptCacheEphemeral,
 		},

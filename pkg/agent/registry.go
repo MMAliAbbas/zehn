@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -10,6 +13,13 @@ import (
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
+
+// AgentDescriptor is the compact discovery model exposed to peer agents.
+type AgentDescriptor struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
 
 // AgentRegistry manages multiple agent instances and routes messages to them.
 type AgentRegistry struct {
@@ -53,6 +63,8 @@ func NewAgentRegistry(
 		}
 	}
 
+	registry.installAgentDiscoveryPrompts()
+
 	return registry
 }
 
@@ -78,7 +90,103 @@ func (r *AgentRegistry) ListAgentIDs() []string {
 	for id := range r.agents {
 		ids = append(ids, id)
 	}
+	slices.Sort(ids)
 	return ids
+}
+
+// ListAgentDescriptors returns compact descriptors for all registered agents.
+func (r *AgentRegistry) ListAgentDescriptors() []AgentDescriptor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	descriptors := make([]AgentDescriptor, 0, len(r.agents))
+	for _, agent := range r.agents {
+		descriptors = append(descriptors, agentDescriptor(agent))
+	}
+	slices.SortFunc(descriptors, func(a, b AgentDescriptor) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	return descriptors
+}
+
+// GetAgentDescriptor returns the discovery descriptor for a normalized agent ID.
+func (r *AgentRegistry) GetAgentDescriptor(agentID string) (AgentDescriptor, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id := routing.NormalizeAgentID(agentID)
+	agent, ok := r.agents[id]
+	if !ok {
+		return AgentDescriptor{}, false
+	}
+	return agentDescriptor(agent), true
+}
+
+func (r *AgentRegistry) installAgentDiscoveryPrompts() {
+	descriptors := r.ListAgentDescriptors()
+	if len(descriptors) <= 1 {
+		return
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, agent := range r.agents {
+		if agent == nil || agent.ContextBuilder == nil {
+			continue
+		}
+		if err := agent.ContextBuilder.RegisterPromptContributor(agentDiscoveryPromptContributor{
+			selfID:      agent.ID,
+			descriptors: descriptors,
+		}); err != nil {
+			logger.WarnCF("agent", "Failed to register agent discovery prompt contributor", map[string]any{
+				"agent_id": agent.ID,
+				"error":    err.Error(),
+			})
+		}
+	}
+}
+
+func agentDescriptor(agent *AgentInstance) AgentDescriptor {
+	if agent == nil {
+		return AgentDescriptor{}
+	}
+
+	name := strings.TrimSpace(agent.Name)
+	description := strings.TrimSpace("Workspace: " + filepath.Base(agent.Workspace))
+	if agent.ContextBuilder != nil {
+		definition := agent.ContextBuilder.LoadAgentDefinition()
+		if definition.Agent != nil {
+			frontmatter := definition.Agent.Frontmatter
+			if strings.TrimSpace(frontmatter.Name) != "" {
+				name = strings.TrimSpace(frontmatter.Name)
+			}
+			if strings.TrimSpace(frontmatter.Description) != "" {
+				description = strings.TrimSpace(frontmatter.Description)
+			}
+		}
+	}
+	if name == "" {
+		name = agent.ID
+	}
+	if description == "" || description == "Workspace: ." {
+		description = "Agent " + agent.ID
+	}
+
+	return AgentDescriptor{
+		ID:          agent.ID,
+		Name:        compactDescriptorText(name),
+		Description: compactDescriptorText(description),
+	}
+}
+
+func compactDescriptorText(value string) string {
+	const maxLen = 240
+
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) <= maxLen {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:maxLen]))
 }
 
 // CanSpawnSubagent checks if parentAgentID is allowed to spawn targetAgentID.

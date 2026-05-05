@@ -54,6 +54,7 @@ const (
 	PromptSourceActiveSkills   PromptSourceID = "skill:active"
 	PromptSourceToolRegistry   PromptSourceID = "tool_registry:native"
 	PromptSourceToolDiscovery  PromptSourceID = "tool_registry:discovery"
+	PromptSourceAgentDiscovery PromptSourceID = "agent:discovery"
 	PromptSourceOutputPolicy   PromptSourceID = "runtime.output"
 	PromptSourceSubTurnProfile PromptSourceID = "subturn.profile"
 	PromptSourceUserMessage    PromptSourceID = "turn:user_message"
@@ -178,6 +179,13 @@ func builtinPromptSources() []PromptSourceDescriptor {
 			ID:              PromptSourceToolRegistry,
 			Owner:           "tools",
 			Description:     "Native provider tool definitions",
+			Allowed:         []PromptPlacement{{Layer: PromptLayerCapability, Slot: PromptSlotTooling}},
+			StableByDefault: true,
+		},
+		{
+			ID:              PromptSourceAgentDiscovery,
+			Owner:           "agent",
+			Description:     "Configured peer agent descriptors",
 			Allowed:         []PromptPlacement{{Layer: PromptLayerCapability, Slot: PromptSlotTooling}},
 			StableByDefault: true,
 		},

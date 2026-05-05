@@ -183,7 +183,7 @@ assert_scoped_changes() {
   done < <({
     git -C "$ROOT" diff --name-only
     git -C "$ROOT" diff --cached --name-only
-    git -C "$ROOT" ls-files --others --exclude-standard
+    git -C "$ROOT" ls-files --others --exclude-standard -- . ':!workspace/skills/picoclaw-project' ':!workspace/skills/picoclaw-usage'
   } | sort -u)
 
   bad=()

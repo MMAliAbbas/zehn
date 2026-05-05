@@ -797,8 +797,20 @@ func TestDefaultConfig_DelegateToolDisabled(t *testing.T) {
 	if cfg.Tools.Delegate.Enabled {
 		t.Fatal("DefaultConfig().Tools.Delegate.Enabled should be false")
 	}
+	if cfg.Tools.DelegationInbox.Enabled {
+		t.Fatal("DefaultConfig().Tools.DelegationInbox.Enabled should be false")
+	}
+	if cfg.Tools.DelegationStatus.Enabled {
+		t.Fatal("DefaultConfig().Tools.DelegationStatus.Enabled should be false")
+	}
 	if cfg.Tools.IsToolEnabled("delegate_to_agent") {
 		t.Fatal("delegate_to_agent should be disabled unless explicitly enabled")
+	}
+	if cfg.Tools.IsToolEnabled("delegation_inbox") {
+		t.Fatal("delegation_inbox should be disabled unless explicitly enabled")
+	}
+	if cfg.Tools.IsToolEnabled("delegation_status") {
+		t.Fatal("delegation_status should be disabled unless explicitly enabled")
 	}
 }
 

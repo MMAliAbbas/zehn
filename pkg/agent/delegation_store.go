@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +42,14 @@ type AgentDelegationRecord struct {
 	CompletedAt   *time.Time                   `json:"completed_at,omitempty"`
 	Result        *AgentDelegationRecordResult `json:"result,omitempty"`
 	Error         *AgentDelegationRecordError  `json:"error,omitempty"`
+}
+
+type AgentDelegationRecordQuery struct {
+	DelegationID      string
+	VisibleToAgentID  string
+	ParentAgentID     string
+	TargetAgentID     string
+	IncludePrivateAll bool
 }
 
 type AgentDelegationRecordRequest struct {
@@ -177,6 +187,55 @@ func (s *DelegationRecordStore) Get(ctx context.Context, delegationID string) (A
 	return rec, nil
 }
 
+func (s *DelegationRecordStore) List(ctx context.Context, query AgentDelegationRecordQuery) ([]AgentDelegationRecord, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(query.DelegationID) != "" {
+		rec, err := s.Get(ctx, query.DelegationID)
+		if err != nil {
+			return nil, err
+		}
+		if !recordMatchesDelegationQuery(rec, query) {
+			return nil, nil
+		}
+		return []AgentDelegationRecord{rec}, nil
+	}
+
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	records := make([]AgentDelegationRecord, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		id := strings.TrimSuffix(entry.Name(), ".json")
+		rec, err := s.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if recordMatchesDelegationQuery(rec, query) {
+			records = append(records, rec)
+		}
+	}
+	slices.SortFunc(records, func(a, b AgentDelegationRecord) int {
+		if cmpCreated := cmp.Compare(a.CreatedAt.UnixNano(), b.CreatedAt.UnixNano()); cmpCreated != 0 {
+			return cmpCreated
+		}
+		return cmp.Compare(a.DelegationID, b.DelegationID)
+	})
+	return records, nil
+}
+
 func (s *DelegationRecordStore) update(ctx context.Context, delegationID string, mutate func(*AgentDelegationRecord, time.Time)) error {
 	if s == nil {
 		return nil
@@ -195,6 +254,25 @@ func (s *DelegationRecordStore) update(ctx context.Context, delegationID string,
 	mutate(&rec, now)
 	rec.UpdatedAt = now
 	return s.writeUnlocked(rec)
+}
+
+func recordMatchesDelegationQuery(rec AgentDelegationRecord, query AgentDelegationRecordQuery) bool {
+	if query.DelegationID != "" && rec.DelegationID != strings.TrimSpace(query.DelegationID) {
+		return false
+	}
+	if query.ParentAgentID != "" && rec.ParentAgentID != strings.TrimSpace(query.ParentAgentID) {
+		return false
+	}
+	if query.TargetAgentID != "" && rec.TargetAgentID != strings.TrimSpace(query.TargetAgentID) {
+		return false
+	}
+	if !query.IncludePrivateAll {
+		visibleTo := strings.TrimSpace(query.VisibleToAgentID)
+		if visibleTo != "" && rec.ParentAgentID != visibleTo && rec.TargetAgentID != visibleTo {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *DelegationRecordStore) write(ctx context.Context, rec AgentDelegationRecord) error {

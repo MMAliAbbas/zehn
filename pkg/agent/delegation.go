@@ -10,6 +10,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
+	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 var (
@@ -53,29 +54,112 @@ func (al *AgentLoop) RunAgentDelegation(
 	ctx context.Context,
 	req AgentDelegationRequest,
 ) (AgentDelegationResult, error) {
+	record, req, result, err := al.prepareAgentDelegation(ctx, req, "sync")
+	if err != nil {
+		return result, err
+	}
+	return al.runPreparedAgentDelegation(ctx, req, record, result)
+}
+
+func (al *AgentLoop) RunAgentDelegationAsync(
+	ctx context.Context,
+	req AgentDelegationRequest,
+) (AgentDelegationResult, error) {
+	record, req, result, err := al.prepareAgentDelegation(ctx, req, "async")
+	if err != nil {
+		return result, err
+	}
+	go func() {
+		_, _ = al.runPreparedAgentDelegation(context.Background(), req, record, result)
+	}()
+	return result, nil
+}
+
+func (al *AgentLoop) RunDelegation(
+	ctx context.Context,
+	req tools.DelegateExecutionRequest,
+) (tools.DelegateExecutionResult, error) {
+	result, err := al.RunAgentDelegation(ctx, agentDelegationRequestFromTool(req, "sync"))
+	return toolDelegationResult(result), err
+}
+
+func (al *AgentLoop) StartDelegation(
+	ctx context.Context,
+	req tools.DelegateExecutionRequest,
+) (tools.DelegateExecutionResult, error) {
+	result, err := al.RunAgentDelegationAsync(ctx, agentDelegationRequestFromTool(req, "async"))
+	return toolDelegationResult(result), err
+}
+
+func (al *AgentLoop) GetDelegationRecord(ctx context.Context, delegationID string) (tools.DelegationRecord, error) {
+	if al == nil || al.delegationRecords == nil {
+		return tools.DelegationRecord{}, tools.ErrDelegationRecordNotFound
+	}
+	rec, err := al.delegationRecords.Get(ctx, delegationID)
+	if err != nil {
+		return tools.DelegationRecord{}, err
+	}
+	return toolDelegationRecord(rec), nil
+}
+
+func (al *AgentLoop) ListDelegationRecords(
+	ctx context.Context,
+	query tools.DelegationRecordQuery,
+) ([]tools.DelegationRecord, error) {
+	if al == nil || al.delegationRecords == nil {
+		return nil, nil
+	}
+	records, err := al.delegationRecords.List(ctx, AgentDelegationRecordQuery{
+		DelegationID:      query.DelegationID,
+		VisibleToAgentID:  routing.NormalizeAgentID(query.VisibleToAgentID),
+		ParentAgentID:     routing.NormalizeAgentID(query.ParentAgentID),
+		TargetAgentID:     routing.NormalizeAgentID(query.TargetAgentID),
+		IncludePrivateAll: query.IncludePrivateAll,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tools.DelegationRecord, 0, len(records))
+	for _, rec := range records {
+		out = append(out, toolDelegationRecord(rec))
+	}
+	return out, nil
+}
+
+func (al *AgentLoop) prepareAgentDelegation(
+	ctx context.Context,
+	req AgentDelegationRequest,
+	mode string,
+) (AgentDelegationRecord, AgentDelegationRequest, AgentDelegationResult, error) {
 	if al == nil || al.registry == nil {
-		return AgentDelegationResult{}, fmt.Errorf(
+		err := fmt.Errorf(
 			"%w: agent loop is not initialized",
 			ErrAgentDelegationInvalidRequest,
 		)
+		return AgentDelegationRecord{}, req, AgentDelegationResult{}, err
 	}
 
 	parentAgentID := routing.NormalizeAgentID(req.ParentAgentID)
 	targetAgentID := routing.NormalizeAgentID(req.TargetAgentID)
 	task := strings.TrimSpace(req.Task)
 	if parentAgentID == "" || targetAgentID == "" || task == "" {
-		return AgentDelegationResult{}, fmt.Errorf(
+		err := fmt.Errorf(
 			"%w: parent agent, target agent, and task are required",
 			ErrAgentDelegationInvalidRequest,
 		)
+		return AgentDelegationRecord{}, req, AgentDelegationResult{}, err
 	}
 	req.ParentAgentID = parentAgentID
 	req.TargetAgentID = targetAgentID
 	req.Task = task
+	req.Mode = strings.TrimSpace(mode)
+	if req.Mode == "" {
+		req.Mode = "sync"
+	}
 
 	record, err := al.delegationRecords.Requested(ctx, req)
 	if err != nil {
-		return AgentDelegationResult{}, err
+		return AgentDelegationRecord{}, req, AgentDelegationResult{}, err
 	}
 	result := AgentDelegationResult{
 		DelegationID:  record.DelegationID,
@@ -92,7 +176,7 @@ func (al *AgentLoop) RunAgentDelegation(
 			targetAgentID,
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
-		return result, err
+		return record, req, result, err
 	}
 
 	target, ok := al.registry.GetAgent(targetAgentID)
@@ -103,25 +187,44 @@ func (al *AgentLoop) RunAgentDelegation(
 			targetAgentID,
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		return record, req, result, err
+	}
+	return record, req, result, nil
+}
+
+func (al *AgentLoop) runPreparedAgentDelegation(
+	ctx context.Context,
+	req AgentDelegationRequest,
+	record AgentDelegationRecord,
+	result AgentDelegationResult,
+) (AgentDelegationResult, error) {
+	target, ok := al.registry.GetAgent(req.TargetAgentID)
+	if !ok || target == nil {
+		err := fmt.Errorf(
+			"%w: target agent %q is not registered",
+			ErrAgentDelegationTargetNotFound,
+			req.TargetAgentID,
+		)
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
 		return result, err
 	}
 
-	scope := buildDelegationSessionScope(parentAgentID, targetAgentID, req.ThreadKey)
+	scope := buildDelegationSessionScope(req.ParentAgentID, req.TargetAgentID, req.ThreadKey)
 	sessionKey := session.BuildSessionKey(scope)
-	alias := buildDelegationSessionAlias(parentAgentID, targetAgentID, req.ThreadKey)
+	alias := buildDelegationSessionAlias(req.ParentAgentID, req.TargetAgentID, req.ThreadKey)
 	dispatch := DispatchRequest{
 		SessionKey:     sessionKey,
 		SessionAliases: []string{alias},
 		SessionScope:   &scope,
-		UserMessage:    task,
+		UserMessage:    req.Task,
 		InboundContext: &bus.InboundContext{
 			Channel:  "internal",
 			ChatID:   alias,
 			ChatType: "delegation",
-			SenderID: parentAgentID,
+			SenderID: req.ParentAgentID,
 		},
 		RouteResult: &routing.ResolvedRoute{
-			AgentID:   targetAgentID,
+			AgentID:   req.TargetAgentID,
 			Channel:   "internal",
 			MatchedBy: "delegation",
 			SessionPolicy: routing.SessionPolicy{
@@ -131,8 +234,8 @@ func (al *AgentLoop) RunAgentDelegation(
 	}
 	opts := processOptions{
 		Dispatch:                dispatch,
-		SenderID:                parentAgentID,
-		SenderDisplayName:       parentAgentID,
+		SenderID:                req.ParentAgentID,
+		SenderDisplayName:       req.ParentAgentID,
 		DefaultResponse:         defaultResponse,
 		EnableSummary:           false,
 		SendResponse:            false,
@@ -164,6 +267,72 @@ func (al *AgentLoop) RunAgentDelegation(
 		return result, err
 	}
 	return result, nil
+}
+
+func agentDelegationRequestFromTool(req tools.DelegateExecutionRequest, mode string) AgentDelegationRequest {
+	dueAt := parseDelegationDue(req.Due)
+	return AgentDelegationRequest{
+		ParentAgentID:    routing.NormalizeAgentID(req.ParentAgentID),
+		TargetAgentID:    routing.NormalizeAgentID(req.TargetAgentID),
+		Task:             req.Task,
+		ThreadKey:        req.ThreadKey,
+		Mode:             mode,
+		Priority:         req.Priority,
+		DueAt:            dueAt,
+		RequestedBy:      req.RequestedBy,
+		ApprovalRequired: req.ApprovalRequired,
+		ArtifactRefs:     req.ArtifactRefs,
+	}
+}
+
+func parseDelegationDue(value string) *time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, time.DateOnly} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
+func toolDelegationResult(result AgentDelegationResult) tools.DelegateExecutionResult {
+	return tools.DelegateExecutionResult{
+		DelegationID:  result.DelegationID,
+		ParentAgentID: result.ParentAgentID,
+		TargetAgentID: result.TargetAgentID,
+		Content:       result.Content,
+		Status:        string(result.Status),
+		ArtifactRefs:  result.ArtifactRefs,
+	}
+}
+
+func toolDelegationRecord(rec AgentDelegationRecord) tools.DelegationRecord {
+	out := tools.DelegationRecord{
+		DelegationID:  rec.DelegationID,
+		Status:        string(rec.Status),
+		ParentAgentID: rec.ParentAgentID,
+		TargetAgentID: rec.TargetAgentID,
+		Task:          rec.Request.Task,
+		ThreadKey:     rec.Request.ThreadKey,
+		Mode:          rec.Request.Mode,
+		Priority:      rec.Request.Priority,
+		RequestedBy:   rec.Request.RequestedBy,
+		ArtifactRefs:  rec.Request.ArtifactRefs,
+		CreatedAt:     rec.CreatedAt,
+		UpdatedAt:     rec.UpdatedAt,
+		StartedAt:     rec.StartedAt,
+		CompletedAt:   rec.CompletedAt,
+	}
+	if rec.Result != nil {
+		out.Result = rec.Result.Content
+	}
+	if rec.Error != nil {
+		out.Error = rec.Error.Message
+	}
+	return out
 }
 
 func buildDelegationSessionScope(parentAgentID, targetAgentID, threadKey string) session.SessionScope {

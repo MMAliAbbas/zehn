@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recordingDelegateSpawner struct {
@@ -38,7 +39,7 @@ func TestDelegateTool_Parameters(t *testing.T) {
 	if !ok {
 		t.Fatal("properties should be a map")
 	}
-	for _, name := range []string{"agent_id", "task", "thread_key", "priority", "due", "artifact_refs"} {
+	for _, name := range []string{"agent_id", "task", "mode", "thread_key", "priority", "due", "artifact_refs"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("expected parameter %q in schema", name)
 		}
@@ -49,6 +50,70 @@ func TestDelegateTool_Parameters(t *testing.T) {
 	}
 	if len(required) != 2 || required[0] != "agent_id" || required[1] != "task" {
 		t.Fatalf("required = %v, want [agent_id task]", required)
+	}
+}
+
+type recordingDelegationRunner struct {
+	startResult DelegateExecutionResult
+	startErr    error
+	startReq    DelegateExecutionRequest
+	startCalls  int
+}
+
+func (r *recordingDelegationRunner) RunDelegation(ctx context.Context, req DelegateExecutionRequest) (DelegateExecutionResult, error) {
+	return DelegateExecutionResult{}, errors.New("sync runner should not be called")
+}
+
+func (r *recordingDelegationRunner) StartDelegation(ctx context.Context, req DelegateExecutionRequest) (DelegateExecutionResult, error) {
+	r.startCalls++
+	r.startReq = req
+	if r.startErr != nil {
+		return DelegateExecutionResult{}, r.startErr
+	}
+	if r.startResult.DelegationID != "" {
+		return r.startResult, nil
+	}
+	return DelegateExecutionResult{DelegationID: "delegation-123", TargetAgentID: req.TargetAgentID}, nil
+}
+
+func TestDelegateTool_Execute_AsyncReturnsDelegationIDImmediately(t *testing.T) {
+	runner := &recordingDelegationRunner{}
+	tool := NewDelegateTool()
+	tool.SetDelegationRunner(runner)
+	tool.SetAllowlistChecker(func(targetAgentID string) bool { return targetAgentID == "engineering" })
+	tool.SetTargetExistsChecker(func(targetAgentID string) bool { return targetAgentID == "engineering" })
+
+	start := time.Now()
+	result := tool.Execute(context.Background(), map[string]any{
+		"agent_id":   "engineering",
+		"task":       "Inspect the repository and report risks.",
+		"mode":       "async",
+		"thread_key": "repo-risk",
+	})
+
+	if time.Since(start) > time.Second {
+		t.Fatal("async delegation should return immediately")
+	}
+	if result.IsError {
+		t.Fatalf("Execute() returned error: %s", result.ForLLM)
+	}
+	if !result.Async {
+		t.Fatal("async delegation result should be marked async")
+	}
+	if !strings.Contains(result.ForLLM, "delegation-123") {
+		t.Fatalf("ForLLM = %q, want delegation ID", result.ForLLM)
+	}
+	if runner.startCalls != 1 {
+		t.Fatalf("StartDelegation calls = %d, want 1", runner.startCalls)
+	}
+	if runner.startReq.TargetAgentID != "engineering" {
+		t.Fatalf("TargetAgentID = %q, want engineering", runner.startReq.TargetAgentID)
+	}
+	if runner.startReq.Mode != "async" {
+		t.Fatalf("Mode = %q, want async", runner.startReq.Mode)
+	}
+	if runner.startReq.ThreadKey != "repo-risk" {
+		t.Fatalf("ThreadKey = %q, want repo-risk", runner.startReq.ThreadKey)
 	}
 }
 

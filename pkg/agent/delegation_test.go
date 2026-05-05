@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -175,6 +176,94 @@ func TestRunAgentDelegation_MissingTarget(t *testing.T) {
 	if !errors.Is(err, ErrAgentDelegationTargetNotFound) {
 		t.Fatalf("error = %v, want ErrAgentDelegationTargetNotFound", err)
 	}
+}
+
+func TestRunAgentDelegationAsync_ReturnsIDAndPersistsCompletedResult(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	provider := &blockingDelegationProvider{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+
+	result, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "prepare async report",
+		ThreadKey:     "async-report",
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegationAsync() error = %v", err)
+	}
+	if result.DelegationID == "" {
+		t.Fatal("DelegationID is empty")
+	}
+	if result.TargetAgentID != "target" {
+		t.Fatalf("TargetAgentID = %q, want target", result.TargetAgentID)
+	}
+
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("async target turn did not start")
+	}
+	running, err := al.delegationRecords.Get(context.Background(), result.DelegationID)
+	if err != nil {
+		t.Fatalf("Get(running) error = %v", err)
+	}
+	if running.Status != AgentDelegationStatusRunning {
+		t.Fatalf("Status = %q, want running", running.Status)
+	}
+
+	close(provider.release)
+	deadline := time.After(2 * time.Second)
+	for {
+		rec, err := al.delegationRecords.Get(context.Background(), result.DelegationID)
+		if err != nil {
+			t.Fatalf("Get(completed) error = %v", err)
+		}
+		if rec.Status == AgentDelegationStatusCompleted {
+			if rec.Result == nil || rec.Result.Content != "async target answer" {
+				t.Fatalf("Result = %#v, want async target answer", rec.Result)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("delegation status = %q, want completed", rec.Status)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+type blockingDelegationProvider struct {
+	startOnce sync.Once
+	started   chan struct{}
+	release   chan struct{}
+}
+
+func (p *blockingDelegationProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.startOnce.Do(func() { close(p.started) })
+	select {
+	case <-p.release:
+		return &providers.LLMResponse{Content: "async target answer", FinishReason: "stop"}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (p *blockingDelegationProvider) GetDefaultModel() string {
+	return "provider-default"
 }
 
 func writeDelegationPromptFile(t *testing.T, dir, name, content string) {

@@ -178,6 +178,48 @@ func TestDelegationRecordStore_CancelledStatus(t *testing.T) {
 	}
 }
 
+func TestDelegationRecordStore_ListScopesByVisibleAgentAndTarget(t *testing.T) {
+	store := NewDelegationRecordStore(t.TempDir(), nil)
+	store.now = fixedDelegationClock(
+		time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 6, 10, 1, 0, 0, time.UTC),
+		time.Date(2026, 5, 6, 10, 2, 0, 0, time.UTC),
+	)
+	for _, req := range []AgentDelegationRequest{
+		{ParentAgentID: "ceo", TargetAgentID: "cto", Task: "engineering plan"},
+		{ParentAgentID: "ceo", TargetAgentID: "cro", Task: "revenue plan"},
+		{ParentAgentID: "cfo", TargetAgentID: "legal", Task: "private finance review"},
+	} {
+		if _, err := store.Requested(context.Background(), req); err != nil {
+			t.Fatalf("Requested() error = %v", err)
+		}
+	}
+
+	visible, err := store.List(context.Background(), AgentDelegationRecordQuery{VisibleToAgentID: "ceo"})
+	if err != nil {
+		t.Fatalf("List(visible) error = %v", err)
+	}
+	if len(visible) != 2 {
+		t.Fatalf("visible records = %d, want 2: %#v", len(visible), visible)
+	}
+	for _, rec := range visible {
+		if rec.ParentAgentID != "ceo" && rec.TargetAgentID != "ceo" {
+			t.Fatalf("visible record leaked unrelated delegation: %#v", rec)
+		}
+	}
+
+	inbox, err := store.List(context.Background(), AgentDelegationRecordQuery{
+		VisibleToAgentID: "cto",
+		TargetAgentID:    "cto",
+	})
+	if err != nil {
+		t.Fatalf("List(inbox) error = %v", err)
+	}
+	if len(inbox) != 1 || inbox[0].TargetAgentID != "cto" {
+		t.Fatalf("inbox records = %#v, want one cto record", inbox)
+	}
+}
+
 func TestDelegationRecordStore_RejectsUnsafeRecordIDs(t *testing.T) {
 	store := NewDelegationRecordStore(t.TempDir(), nil)
 	if _, err := store.Get(context.Background(), "../escape"); err == nil {

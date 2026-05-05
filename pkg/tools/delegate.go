@@ -14,6 +14,7 @@ type DelegateTool struct {
 	allowlistCheck func(targetAgentID string) bool
 	targetExists   func(targetAgentID string) bool
 	targetModel    func(targetAgentID string) string
+	runner         DelegationRunner
 }
 
 func NewDelegateTool(managers ...*SubagentManager) *DelegateTool {
@@ -44,12 +45,16 @@ func (t *DelegateTool) SetTargetModelResolver(resolve func(targetAgentID string)
 	t.targetModel = resolve
 }
 
+func (t *DelegateTool) SetDelegationRunner(runner DelegationRunner) {
+	t.runner = runner
+}
+
 func (t *DelegateTool) Name() string {
 	return "delegate_to_agent"
 }
 
 func (t *DelegateTool) Description() string {
-	return "Delegate a bounded synchronous task, question, or review to an allowed configured peer agent and return its response."
+	return "Delegate a task, question, or review to an allowed configured peer agent. Sync mode returns the response; async mode returns a durable delegation ID immediately."
 }
 
 func (t *DelegateTool) Parameters() map[string]any {
@@ -63,6 +68,11 @@ func (t *DelegateTool) Parameters() map[string]any {
 			"task": map[string]any{
 				"type":        "string",
 				"description": "Bounded task, question, review, or work request for the target agent.",
+			},
+			"mode": map[string]any{
+				"type":        "string",
+				"description": "Execution mode: sync or async. Defaults to sync.",
+				"enum":        []string{"sync", "async"},
 			},
 			"thread_key": map[string]any{
 				"type":        "string",
@@ -107,14 +117,66 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	if t.targetExists != nil && !t.targetExists(agentID) {
 		return delegateError("missing_target", fmt.Sprintf("target agent %q not found", agentID))
 	}
-	if t.spawner == nil {
-		return delegateError("execution_failed", "delegated execution failed: subturn spawner not configured")
-	}
 
 	threadKey, _ := args["thread_key"].(string)
 	priority, _ := args["priority"].(string)
 	due, _ := args["due"].(string)
 	artifactRefs := delegateArtifactRefs(args["artifact_refs"])
+	mode, _ := args["mode"].(string)
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "sync"
+	}
+	if mode != "sync" && mode != "async" {
+		return delegateError("invalid_mode", "mode must be either sync or async")
+	}
+
+	req := DelegateExecutionRequest{
+		ParentAgentID: ToolAgentID(ctx),
+		TargetAgentID: agentID,
+		Task:          task,
+		ThreadKey:     strings.TrimSpace(threadKey),
+		Mode:          mode,
+		Priority:      strings.TrimSpace(priority),
+		Due:           strings.TrimSpace(due),
+		ArtifactRefs:  artifactRefs,
+	}
+
+	if mode == "async" {
+		if t.runner == nil {
+			return delegateError("execution_failed", "delegated async execution failed: delegation runner not configured")
+		}
+		result, err := t.runner.StartDelegation(ctx, req)
+		if err != nil {
+			return delegateError("execution_failed", fmt.Sprintf("delegated async execution failed: %v", err)).WithError(err)
+		}
+		return &ToolResult{
+			ForLLM: fmt.Sprintf(
+				"Async delegation to %s started with delegation_id=%s. Use delegation_status to inspect progress.",
+				agentID,
+				result.DelegationID,
+			),
+			ForUser: fmt.Sprintf("Delegation %s started for %s.", result.DelegationID, agentID),
+			Async:   true,
+		}
+	}
+
+	if t.runner != nil {
+		result, err := t.runner.RunDelegation(ctx, req)
+		if err != nil {
+			return delegateError("execution_failed", fmt.Sprintf("delegated execution failed: %v", err)).WithError(err)
+		}
+		return &ToolResult{
+			ForLLM:  fmt.Sprintf("Delegation to %s completed.\nDelegation ID: %s\nResult: %s", agentID, result.DelegationID, result.Content),
+			ForUser: delegateCompact(result.Content),
+			Silent:  false,
+			IsError: false,
+			Async:   false,
+		}
+	}
+	if t.spawner == nil {
+		return delegateError("execution_failed", "delegated execution failed: subturn spawner not configured")
+	}
 
 	model := t.defaultModel
 	if t.targetModel != nil {

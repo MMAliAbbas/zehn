@@ -57,8 +57,10 @@ func (al *AgentLoop) StartAgentMeeting(
 	return tools.MeetingExecutionResult{
 		MeetingID:      record.MeetingID,
 		Recommendation: outcome.Recommendation,
+		Participants:   record.Participants,
 		Timeline:       outcome.Timeline,
 		Risks:          outcome.Risks,
+		Approvals:      record.Approvals,
 		FollowUps:      outcome.FollowUps,
 		ArtifactRefs:   record.ArtifactRefs,
 	}, nil

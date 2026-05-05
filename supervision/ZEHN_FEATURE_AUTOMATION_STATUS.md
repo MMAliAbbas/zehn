@@ -1,6 +1,6 @@
 # Zehn Feature Automation Status
 
-Updated: 2026-05-06T01:27:15+05:00
+Updated: 2026-05-06T02:24:00+05:00
 
 This ledger is host-runner owned. A task is green only after its verification commands pass and related changes are reviewed according to the Zehn feature automation process.
 
@@ -18,9 +18,10 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 008-agent-meeting-core | green | `runner-008-agent-meeting-core-20260506004551.log` | host verified |
 | 009-github-meeting-artifacts | green | `runner-009-github-meeting-artifacts-20260506010211.log` | host verified |
 | 010-discord-visibility-summaries | green | `runner-010-discord-visibility-summaries-20260506011602.log` | host verified |
+| 011-end-to-end-delegation-meeting-verification | green | `manual-race-repair-20260506022400` | host verified after subturn/channel race repair |
 
-Total green: 10 / 11
+Total green: 11 / 11
 
 ## Not Green In This Ledger
 
-`011-end-to-end-delegation-meeting-verification`
+All Zehn feature tasks have host-runner green evidence.

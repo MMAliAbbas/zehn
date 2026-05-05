@@ -87,6 +87,7 @@ type Manager struct {
 	config        *config.Config
 	mediaStore    media.MediaStore
 	dispatchTask  *asyncTask
+	dispatchWG    sync.WaitGroup
 	mux           *dynamicServeMux
 	httpServer    *http.Server
 	httpListeners []net.Listener
@@ -806,12 +807,24 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		})
 	}
 
-	// Start the dispatcher that reads from the bus and routes to workers
-	go m.dispatchOutbound(dispatchCtx)
-	go m.dispatchOutboundMedia(dispatchCtx)
+	// Start dispatchers that read from the bus and route to workers. StopAll
+	// waits for these goroutines before closing worker queues so dispatchers
+	// cannot race a send against queue closure.
+	m.dispatchWG.Add(3)
+	go func() {
+		defer m.dispatchWG.Done()
+		m.dispatchOutbound(dispatchCtx)
+	}()
+	go func() {
+		defer m.dispatchWG.Done()
+		m.dispatchOutboundMedia(dispatchCtx)
+	}()
 
 	// Start the TTL janitor that cleans up stale typing/placeholder entries
-	go m.runTTLJanitor(dispatchCtx)
+	go func() {
+		defer m.dispatchWG.Done()
+		m.runTTLJanitor(dispatchCtx)
+	}()
 
 	// Start shared HTTP server if configured
 	if m.httpServer != nil {
@@ -876,6 +889,7 @@ func (m *Manager) StopAll(ctx context.Context) error {
 		m.dispatchTask.cancel()
 		m.dispatchTask = nil
 	}
+	m.dispatchWG.Wait()
 
 	// Close all worker queues and wait for them to drain
 	for _, w := range m.workers {

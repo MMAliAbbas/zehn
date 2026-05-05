@@ -21,8 +21,10 @@ type MeetingExecutionRequest struct {
 type MeetingExecutionResult struct {
 	MeetingID      string
 	Recommendation string
+	Participants   []string
 	Timeline       []string
 	Risks          []string
+	Approvals      []string
 	FollowUps      []string
 	ArtifactRefs   []string
 }
@@ -181,6 +183,10 @@ func formatMeetingResultForLLM(result MeetingExecutionResult) string {
 		sb.WriteString("\nArtifacts: ")
 		sb.WriteString(strings.Join(result.ArtifactRefs, ", "))
 	}
+	if len(result.Participants) > 0 {
+		sb.WriteString("\nParticipants: ")
+		sb.WriteString(strings.Join(result.Participants, ", "))
+	}
 	sb.WriteString("\nConsolidated recommendation: ")
 	sb.WriteString(strings.TrimSpace(result.Recommendation))
 	if len(result.Timeline) > 0 {
@@ -190,6 +196,10 @@ func formatMeetingResultForLLM(result MeetingExecutionResult) string {
 	if len(result.Risks) > 0 {
 		sb.WriteString("\nRisks: ")
 		sb.WriteString(strings.Join(result.Risks, "; "))
+	}
+	if len(result.Approvals) > 0 {
+		sb.WriteString("\nApproval needed: ")
+		sb.WriteString(strings.Join(result.Approvals, "; "))
 	}
 	if len(result.FollowUps) > 0 {
 		sb.WriteString("\nFollow-ups: ")
@@ -208,6 +218,10 @@ func formatMeetingResultForUser(result MeetingExecutionResult) string {
 	if len(result.Risks) > 0 {
 		sb.WriteString("\nRisks: ")
 		sb.WriteString(strings.Join(result.Risks, "; "))
+	}
+	if len(result.Approvals) > 0 {
+		sb.WriteString("\nApproval needed: ")
+		sb.WriteString(strings.Join(result.Approvals, "; "))
 	}
 	if len(result.FollowUps) > 0 {
 		sb.WriteString("\nFollow-ups: ")

@@ -144,7 +144,7 @@ release_lock() {
 }
 
 assert_repo_clean() {
-  status="$(git -C "$ROOT" status --short -- . ':!workspace/skills/picoclaw-project' ':!workspace/skills/picoclaw-usage')"
+  status="$(git -C "$ROOT" status --short)"
   [ -z "$status" ] || {
     log "repo has dirty tracked/managed changes before $TASK"
     printf '%s\n' "$status"
@@ -183,7 +183,7 @@ assert_scoped_changes() {
   done < <({
     git -C "$ROOT" diff --name-only
     git -C "$ROOT" diff --cached --name-only
-    git -C "$ROOT" ls-files --others --exclude-standard -- . ':!workspace/skills/picoclaw-project' ':!workspace/skills/picoclaw-usage'
+    git -C "$ROOT" ls-files --others --exclude-standard
   } | sort -u)
 
   bad=()
@@ -213,6 +213,48 @@ assert_scoped_changes() {
   if [ "${#bad[@]}" -gt 0 ]; then
     printf 'Unscoped changes detected:\n'
     printf 'UNSCOPED %s\n' "${bad[@]}"
+    return 1
+  fi
+}
+
+assert_staged_changes_scoped() {
+  allowed=()
+  while IFS= read -r line; do
+    allowed+=("$line")
+  done < <(extract_allowed_paths)
+
+  staged=()
+  while IFS= read -r line; do
+    staged+=("$line")
+  done < <(git -C "$ROOT" diff --cached --name-only | sort -u)
+
+  bad=()
+  for rel in "${staged[@]}"; do
+    [ -n "$rel" ] || continue
+    ok=0
+    for item in "${allowed[@]}"; do
+      item="${item%/}"
+      case "$item" in
+        */**)
+          prefix="${item%/**}"
+          [[ "$rel" == "$prefix" || "$rel" == "$prefix/"* ]] && ok=1
+          ;;
+        *\*)
+          prefix="${item%\*}"
+          [[ "$rel" == "$prefix"* ]] && ok=1
+          ;;
+        *)
+          [[ "$rel" == "$item" || "$rel" == "$item/"* ]] && ok=1
+          ;;
+      esac
+      [ "$ok" -eq 1 ] && break
+    done
+    [ "$ok" -eq 1 ] || bad+=("$rel")
+  done
+
+  if [ "${#bad[@]}" -gt 0 ]; then
+    printf 'Unscoped staged changes detected:\n'
+    printf 'UNSCOPED-STAGED %s\n' "${bad[@]}"
     return 1
   fi
 }
@@ -382,7 +424,7 @@ commit_changes() {
         matches=()
         while IFS= read -r path; do
           matches+=("$path")
-        done < <(git -C "$ROOT" ls-files --modified --others --exclude-standard -- "$item")
+        done < <(git -C "$ROOT" ls-files --modified --deleted --others --exclude-standard -- "$item")
         if [ "${#matches[@]}" -gt 0 ]; then
           git -C "$ROOT" add -- "${matches[@]}" || return 1
         fi
@@ -394,6 +436,8 @@ commit_changes() {
         ;;
     esac
   done
+
+  assert_staged_changes_scoped || return 1
 
   if git -C "$ROOT" diff --cached --quiet; then
     log "nothing staged"
@@ -466,4 +510,6 @@ EOF
   log "complete for $TASK"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

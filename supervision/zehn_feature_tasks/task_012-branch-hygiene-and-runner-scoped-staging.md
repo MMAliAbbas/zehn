@@ -56,6 +56,7 @@ cd /Users/aliai/zehn
 bash -n operations/run-one-zehn-feature-task.sh
 bash -n operations/audit-zehn-feature-task.sh
 go test ./pkg/config -run '^$' -count=1
+operations/audit-zehn-feature-task.sh --runner-scope-self-test
 operations/audit-zehn-feature-task.sh 012-branch-hygiene-and-runner-scoped-staging
 git show --name-only --oneline a25b1f52 | grep 'workspace/skills/picoclaw-project'
 git show --name-only --oneline a25b1f52 | grep 'workspace/skills/picoclaw-usage'

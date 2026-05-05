@@ -37,6 +37,7 @@ type AgentLoop struct {
 	registry          *AgentRegistry
 	state             *state.Manager
 	delegationRecords *DelegationRecordStore
+	meetingRecords    *MeetingRecordStore
 
 	// Event system (from Incoming)
 	eventBus *EventBus

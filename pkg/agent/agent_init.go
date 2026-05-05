@@ -65,6 +65,10 @@ func NewAgentLoop(
 			defaultDelegationRecordStoreDir(cfg),
 			delegationRecordRedactor(cfg),
 		),
+		meetingRecords: NewMeetingRecordStore(
+			defaultMeetingRecordStoreDir(cfg),
+			delegationRecordRedactor(cfg),
+		),
 		eventBus:    eventBus,
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
@@ -89,6 +93,15 @@ func defaultDelegationRecordStoreDir(cfg *config.Config) string {
 		}
 	}
 	return filepath.Join(config.GetHome(), "delegations")
+}
+
+func defaultMeetingRecordStoreDir(cfg *config.Config) string {
+	if cfg != nil {
+		if workspace := cfg.WorkspacePath(); workspace != "" {
+			return filepath.Join(workspace, "meetings")
+		}
+	}
+	return filepath.Join(config.GetHome(), "meetings")
 }
 
 func delegationRecordRedactor(cfg *config.Config) func(string) string {
@@ -249,6 +262,7 @@ func registerSharedTools(
 		delegateEnabled := cfg.Tools.IsToolEnabled("delegate_to_agent")
 		delegationInboxEnabled := cfg.Tools.IsToolEnabled("delegation_inbox")
 		delegationStatusEnabled := cfg.Tools.IsToolEnabled("delegation_status")
+		meetingEnabled := cfg.Tools.IsToolEnabled("start_agent_meeting")
 		if delegateEnabled {
 			delegateTool := tools.NewDelegateTool()
 			delegateTool.SetDelegationRunner(al)
@@ -274,6 +288,9 @@ func registerSharedTools(
 		}
 		if delegationStatusEnabled {
 			agent.Tools.Register(tools.NewDelegationStatusTool(al))
+		}
+		if meetingEnabled {
+			agent.Tools.Register(tools.NewMeetingTool(al))
 		}
 
 		// Spawn and spawn_status tools share a SubagentManager.

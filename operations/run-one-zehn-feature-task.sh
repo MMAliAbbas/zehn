@@ -172,8 +172,15 @@ PY
 }
 
 assert_scoped_changes() {
-  mapfile -t allowed < <(extract_allowed_paths)
-  mapfile -t changed < <({
+  allowed=()
+  while IFS= read -r line; do
+    allowed+=("$line")
+  done < <(extract_allowed_paths)
+
+  changed=()
+  while IFS= read -r line; do
+    changed+=("$line")
+  done < <({
     git -C "$ROOT" diff --name-only
     git -C "$ROOT" diff --cached --name-only
     git -C "$ROOT" ls-files --others --exclude-standard

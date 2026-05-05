@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -70,6 +71,29 @@ type fakeGitHubArtifactWriter struct {
 	nextNumber int
 }
 
+type blockingGitHubArtifactWriter struct {
+	startOnce sync.Once
+	started   chan struct{}
+	release   chan struct{}
+}
+
+func (w *blockingGitHubArtifactWriter) CreateIssue(ctx context.Context, req integrationtools.GitHubIssueRequest) (integrationtools.GitHubIssueArtifact, error) {
+	w.startOnce.Do(func() { close(w.started) })
+	select {
+	case <-w.release:
+		return integrationtools.GitHubIssueArtifact{
+			Number: 101,
+			URL:    "https://github.example.test/org/repo/issues/" + strings.TrimSpace(req.SourceID),
+		}, nil
+	case <-ctx.Done():
+		return integrationtools.GitHubIssueArtifact{}, ctx.Err()
+	}
+}
+
+func (w *blockingGitHubArtifactWriter) CreateComment(ctx context.Context, req integrationtools.GitHubCommentRequest) error {
+	return nil
+}
+
 func (w *fakeGitHubArtifactWriter) CreateIssue(ctx context.Context, req integrationtools.GitHubIssueRequest) (integrationtools.GitHubIssueArtifact, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -99,6 +123,81 @@ func (w *fakeGitHubArtifactWriter) snapshot() ([]integrationtools.GitHubIssueReq
 	defer w.mu.Unlock()
 	return append([]integrationtools.GitHubIssueRequest(nil), w.issues...),
 		append([]integrationtools.GitHubCommentRequest(nil), w.comments...)
+}
+
+func TestRunAgentDelegationGitHubPublishDoesNotBlockCompletedResult(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	writer := &blockingGitHubArtifactWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	al.SetGitHubArtifactWriter(writer)
+
+	type delegationResult struct {
+		result AgentDelegationResult
+		err    error
+	}
+	done := make(chan delegationResult, 1)
+	go func() {
+		result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+			ParentAgentID:    "parent",
+			TargetAgentID:    "target",
+			Task:             "Prepare the approval package for launch.",
+			ThreadKey:        "launch-approval",
+			ApprovalRequired: true,
+		})
+		done <- delegationResult{result: result, err: err}
+	}()
+
+	var completed delegationResult
+	select {
+	case got := <-done:
+		completed = got
+	case <-writer.started:
+		select {
+		case got := <-done:
+			completed = got
+		case <-time.After(500 * time.Millisecond):
+			close(writer.release)
+			got := <-done
+			if got.err != nil {
+				t.Fatalf("RunAgentDelegation() returned late with error = %v", got.err)
+			}
+			t.Fatalf("RunAgentDelegation() waited for blocked GitHub publishing")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunAgentDelegation() did not complete or start GitHub publishing")
+	}
+	if completed.err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", completed.err)
+	}
+	if completed.result.DelegationID == "" {
+		t.Fatal("DelegationID is empty")
+	}
+	rec, err := al.delegationRecords.Get(context.Background(), completed.result.DelegationID)
+	if err != nil {
+		t.Fatalf("delegationRecords.Get() error = %v", err)
+	}
+	if rec.Status != AgentDelegationStatusCompleted {
+		t.Fatalf("delegation status = %q, want completed", rec.Status)
+	}
+	if rec.GitHubArtifact == nil || rec.GitHubArtifact.Status != AgentGitHubArtifactStatusPending {
+		t.Fatalf("GitHubArtifact = %#v, want pending status while writer is blocked", rec.GitHubArtifact)
+	}
+
+	select {
+	case <-writer.started:
+	default:
+	}
+	close(writer.release)
+	rec = waitForDelegationGitHubStatus(t, al, completed.result.DelegationID, AgentGitHubArtifactStatusCreated)
+	if rec.GitHubArtifact.IssueURL == "" {
+		t.Fatalf("GitHubArtifact = %#v, want issue URL", rec.GitHubArtifact)
+	}
 }
 
 func TestRunAgentMeetingGitHubSkipsIssueWithoutExecutableWork(t *testing.T) {
@@ -161,6 +260,7 @@ func TestRunAgentMeetingGitHubCreatesIssueAndCuratedParticipantComments(t *testi
 		t.Fatalf("StartAgentMeeting() error = %v", err)
 	}
 
+	rec := waitForMeetingGitHubStatus(t, al, result.MeetingID, AgentGitHubArtifactStatusCreated)
 	issues, comments := writer.snapshot()
 	if len(issues) != 1 {
 		t.Fatalf("issues = %d, want 1", len(issues))
@@ -188,8 +288,8 @@ func TestRunAgentMeetingGitHubCreatesIssueAndCuratedParticipantComments(t *testi
 	if strings.Contains(joinedComments, "SECRET_RAW_DEBATE") {
 		t.Fatalf("comments included raw transcript marker:\n%s", joinedComments)
 	}
-	if len(result.ArtifactRefs) == 0 || !strings.Contains(strings.Join(result.ArtifactRefs, ","), "github.example.test") {
-		t.Fatalf("ArtifactRefs = %v, want GitHub issue URL", result.ArtifactRefs)
+	if len(rec.ArtifactRefs) == 0 || !strings.Contains(strings.Join(rec.ArtifactRefs, ","), "github.example.test") {
+		t.Fatalf("record ArtifactRefs = %v, want GitHub issue URL", rec.ArtifactRefs)
 	}
 }
 
@@ -213,6 +313,31 @@ func TestRunAgentMeetingGitHubFailurePreservesMeetingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartAgentMeeting() error = %v", err)
 	}
+	rec := waitForMeetingGitHubStatus(t, al, result.MeetingID, AgentGitHubArtifactStatusFailed)
+	if rec.Status != AgentMeetingStatusCompleted {
+		t.Fatalf("meeting status = %q, want completed", rec.Status)
+	}
+}
+
+func TestRunAgentMeetingGitHubDisabledWriterRecordsSkipped(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo"}}},
+		{ID: "cmo"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingGitHubMeetingProvider{})
+
+	result, err := al.StartAgentMeeting(context.Background(), tools.MeetingExecutionRequest{
+		Title:               "Tracked work with disabled GitHub",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo"},
+		Goal:                "Create executable follow-up work.",
+		Approvals:           []string{"approval required"},
+	})
+	if err != nil {
+		t.Fatalf("StartAgentMeeting() error = %v", err)
+	}
 	rec, err := al.meetingRecords.Get(context.Background(), result.MeetingID)
 	if err != nil {
 		t.Fatalf("meetingRecords.Get() error = %v", err)
@@ -220,8 +345,8 @@ func TestRunAgentMeetingGitHubFailurePreservesMeetingRecord(t *testing.T) {
 	if rec.Status != AgentMeetingStatusCompleted {
 		t.Fatalf("meeting status = %q, want completed", rec.Status)
 	}
-	if rec.GitHubArtifact == nil || rec.GitHubArtifact.Status != AgentGitHubArtifactStatusFailed {
-		t.Fatalf("GitHubArtifact = %#v, want failed status", rec.GitHubArtifact)
+	if rec.GitHubArtifact == nil || rec.GitHubArtifact.Status != AgentGitHubArtifactStatusSkipped {
+		t.Fatalf("GitHubArtifact = %#v, want skipped status", rec.GitHubArtifact)
 	}
 }
 
@@ -254,8 +379,9 @@ func TestRunAgentDelegationGitHubCreatesIssueForApprovalTrackedWork(t *testing.T
 	if !strings.Contains(issues[0].Body, "Approval required") {
 		t.Fatalf("issue body missing approval marker:\n%s", issues[0].Body)
 	}
-	if len(result.ArtifactRefs) == 0 || !strings.Contains(strings.Join(result.ArtifactRefs, ","), "github.example.test") {
-		t.Fatalf("ArtifactRefs = %v, want GitHub issue URL", result.ArtifactRefs)
+	rec := waitForDelegationGitHubStatus(t, al, result.DelegationID, AgentGitHubArtifactStatusCreated)
+	if rec.Result == nil || len(rec.Result.ArtifactRefs) == 0 || !strings.Contains(strings.Join(rec.Result.ArtifactRefs, ","), "github.example.test") {
+		t.Fatalf("record result ArtifactRefs = %#v, want GitHub issue URL", rec.Result)
 	}
 }
 
@@ -280,5 +406,55 @@ func TestRunAgentDelegationGitHubSkipsAdvisoryExchange(t *testing.T) {
 	issues, comments := writer.snapshot()
 	if len(issues) != 0 || len(comments) != 0 {
 		t.Fatalf("GitHub artifacts = %d issues/%d comments, want none", len(issues), len(comments))
+	}
+}
+
+func waitForDelegationGitHubStatus(
+	t *testing.T,
+	al *AgentLoop,
+	delegationID string,
+	want AgentGitHubArtifactStatus,
+) AgentDelegationRecord {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		rec, err := al.delegationRecords.Get(context.Background(), delegationID)
+		if err != nil {
+			t.Fatalf("delegationRecords.Get(%s) error = %v", delegationID, err)
+		}
+		if rec.GitHubArtifact != nil && rec.GitHubArtifact.Status == want {
+			return rec
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("delegation GitHub artifact = %#v, want %q", rec.GitHubArtifact, want)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func waitForMeetingGitHubStatus(
+	t *testing.T,
+	al *AgentLoop,
+	meetingID string,
+	want AgentGitHubArtifactStatus,
+) AgentMeetingRecord {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		rec, err := al.meetingRecords.Get(context.Background(), meetingID)
+		if err != nil {
+			t.Fatalf("meetingRecords.Get(%s) error = %v", meetingID, err)
+		}
+		if rec.GitHubArtifact != nil && rec.GitHubArtifact.Status == want {
+			return rec
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("meeting GitHub artifact = %#v, want %q", rec.GitHubArtifact, want)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }

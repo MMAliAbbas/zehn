@@ -14,8 +14,10 @@ type AgentGitHubArtifactWriter = integrationtools.GitHubArtifactWriter
 type AgentGitHubArtifactStatus string
 
 const (
+	AgentGitHubArtifactStatusPending AgentGitHubArtifactStatus = "pending"
 	AgentGitHubArtifactStatusCreated AgentGitHubArtifactStatus = "created"
 	AgentGitHubArtifactStatusFailed  AgentGitHubArtifactStatus = "failed"
+	AgentGitHubArtifactStatusSkipped AgentGitHubArtifactStatus = "skipped"
 )
 
 type AgentGitHubArtifactWrite struct {
@@ -33,65 +35,134 @@ func (al *AgentLoop) SetGitHubArtifactWriter(writer AgentGitHubArtifactWriter) {
 	al.githubArtifacts = writer
 }
 
+const defaultGitHubArtifactPublishTimeout = 30 * time.Second
+
+var defaultGitHubArtifactPublisher = newGitHubArtifactPublisher(4, defaultGitHubArtifactPublishTimeout)
+
+type githubArtifactPublisher struct {
+	sem     chan struct{}
+	timeout time.Duration
+}
+
+func newGitHubArtifactPublisher(maxConcurrent int, timeout time.Duration) *githubArtifactPublisher {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 1
+	}
+	if timeout <= 0 {
+		timeout = defaultGitHubArtifactPublishTimeout
+	}
+	return &githubArtifactPublisher{
+		sem:     make(chan struct{}, maxConcurrent),
+		timeout: timeout,
+	}
+}
+
+func (p *githubArtifactPublisher) Submit(run func(context.Context)) bool {
+	if p == nil {
+		return false
+	}
+	select {
+	case p.sem <- struct{}{}:
+	default:
+		return false
+	}
+	go func() {
+		defer func() { <-p.sem }()
+		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		defer cancel()
+		run(ctx)
+	}()
+	return true
+}
+
 func (al *AgentLoop) maybePublishMeetingGitHubArtifact(
 	ctx context.Context,
 	record AgentMeetingRecord,
 	outcome AgentMeetingOutcome,
 ) (AgentMeetingRecord, error) {
-	if al == nil || al.githubArtifacts == nil {
+	if al == nil {
 		return record, nil
 	}
 	if !meetingNeedsGitHubIssue(record, outcome) {
 		return record, nil
 	}
+	if al.githubArtifacts == nil {
+		if err := al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
+			Status: AgentGitHubArtifactStatusSkipped,
+			Error:  "github artifact writer disabled",
+		}, nil); err != nil {
+			return record, err
+		}
+		return al.meetingRecords.Get(context.Background(), record.MeetingID)
+	}
 
-	issue, err := al.githubArtifacts.CreateIssue(ctx, integrationtools.GitHubIssueRequest{
+	if err := al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
+		Status: AgentGitHubArtifactStatusPending,
+	}, nil); err != nil {
+		return record, err
+	}
+	updated, err := al.meetingRecords.Get(context.Background(), record.MeetingID)
+	if err != nil {
+		return record, err
+	}
+
+	writer := al.githubArtifacts
+	issueReq := integrationtools.GitHubIssueRequest{
 		SourceType: "meeting",
 		SourceID:   record.MeetingID,
 		Title:      "Meeting: " + record.Title,
 		Body:       buildMeetingGitHubIssueBody(record, outcome),
 		Labels:     []string{"meeting", "tracker"},
-	})
-	if err != nil {
+	}
+	if !defaultGitHubArtifactPublisher.Submit(func(publishCtx context.Context) {
+		issue, err := writer.CreateIssue(publishCtx, issueReq)
+		if err != nil {
+			_ = al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
+				Status: AgentGitHubArtifactStatusFailed,
+				Error:  err.Error(),
+			}, nil)
+			return
+		}
+
+		for _, turn := range record.ParticipantTurns {
+			body := curatedGitHubParticipantComment(turn)
+			if body == "" {
+				continue
+			}
+			if err := writer.CreateComment(publishCtx, integrationtools.GitHubCommentRequest{
+				IssueNumber:   issue.Number,
+				IssueURL:      issue.URL,
+				SourceType:    "meeting",
+				SourceID:      record.MeetingID,
+				AuthorAgentID: turn.AgentID,
+				Body:          body,
+			}); err != nil {
+				_ = al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
+					Status:   AgentGitHubArtifactStatusFailed,
+					IssueID:  issue.Number,
+					IssueURL: issue.URL,
+					Error:    err.Error(),
+				}, []string{issue.URL})
+				return
+			}
+		}
+
+		if err := al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
+			Status:   AgentGitHubArtifactStatusCreated,
+			IssueID:  issue.Number,
+			IssueURL: issue.URL,
+		}, []string{issue.URL}); err != nil {
+			return
+		}
+		al.publishIssueCreatedSummary(context.Background(), "meeting", record.MeetingID, issue.URL)
+	}) {
 		_ = al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
 			Status: AgentGitHubArtifactStatusFailed,
-			Error:  err.Error(),
+			Error:  "github artifact publisher at capacity",
 		}, nil)
 		return al.meetingRecords.Get(context.Background(), record.MeetingID)
 	}
-
-	for _, turn := range record.ParticipantTurns {
-		body := curatedGitHubParticipantComment(turn)
-		if body == "" {
-			continue
-		}
-		if err := al.githubArtifacts.CreateComment(ctx, integrationtools.GitHubCommentRequest{
-			IssueNumber:   issue.Number,
-			IssueURL:      issue.URL,
-			SourceType:    "meeting",
-			SourceID:      record.MeetingID,
-			AuthorAgentID: turn.AgentID,
-			Body:          body,
-		}); err != nil {
-			_ = al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
-				Status:   AgentGitHubArtifactStatusFailed,
-				IssueID:  issue.Number,
-				IssueURL: issue.URL,
-				Error:    err.Error(),
-			}, []string{issue.URL})
-			return al.meetingRecords.Get(context.Background(), record.MeetingID)
-		}
-	}
-
-	if err := al.meetingRecords.RecordGitHubArtifact(ctx, record.MeetingID, AgentGitHubArtifactWrite{
-		Status:   AgentGitHubArtifactStatusCreated,
-		IssueID:  issue.Number,
-		IssueURL: issue.URL,
-	}, []string{issue.URL}); err != nil {
-		return record, err
-	}
-	al.publishIssueCreatedSummary(ctx, "meeting", record.MeetingID, issue.URL)
-	return al.meetingRecords.Get(ctx, record.MeetingID)
+	return updated, nil
 }
 
 func (al *AgentLoop) maybePublishDelegationGitHubArtifact(
@@ -100,30 +171,50 @@ func (al *AgentLoop) maybePublishDelegationGitHubArtifact(
 	req AgentDelegationRequest,
 	result AgentDelegationResult,
 ) AgentDelegationResult {
-	if al == nil || al.githubArtifacts == nil || !delegationNeedsGitHubIssue(req) {
+	if al == nil || !delegationNeedsGitHubIssue(req) {
 		return result
 	}
-	issue, err := al.githubArtifacts.CreateIssue(ctx, integrationtools.GitHubIssueRequest{
+	if al.githubArtifacts == nil {
+		_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{
+			Status: AgentGitHubArtifactStatusSkipped,
+			Error:  "github artifact writer disabled",
+		}, nil)
+		return result
+	}
+	_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{
+		Status: AgentGitHubArtifactStatusPending,
+	}, nil)
+
+	writer := al.githubArtifacts
+	issueReq := integrationtools.GitHubIssueRequest{
 		SourceType: "delegation",
 		SourceID:   record.DelegationID,
 		Title:      "Delegation: " + delegationIssueTitle(req),
 		Body:       buildDelegationGitHubIssueBody(record, req, result),
 		Labels:     []string{"delegation", "tracker"},
-	})
-	if err != nil {
+	}
+	if !defaultGitHubArtifactPublisher.Submit(func(publishCtx context.Context) {
+		issue, err := writer.CreateIssue(publishCtx, issueReq)
+		if err != nil {
+			_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{
+				Status: AgentGitHubArtifactStatusFailed,
+				Error:  err.Error(),
+			}, nil)
+			return
+		}
+		_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{
+			Status:   AgentGitHubArtifactStatusCreated,
+			IssueID:  issue.Number,
+			IssueURL: issue.URL,
+		}, []string{issue.URL})
+		al.publishIssueCreatedSummary(context.Background(), "delegation", record.DelegationID, issue.URL)
+	}) {
 		_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{
 			Status: AgentGitHubArtifactStatusFailed,
-			Error:  err.Error(),
+			Error:  "github artifact publisher at capacity",
 		}, nil)
 		return result
 	}
-	result.ArtifactRefs = appendUniqueRefs(result.ArtifactRefs, issue.URL)
-	_ = al.delegationRecords.RecordGitHubArtifact(ctx, record.DelegationID, AgentGitHubArtifactWrite{
-		Status:   AgentGitHubArtifactStatusCreated,
-		IssueID:  issue.Number,
-		IssueURL: issue.URL,
-	}, []string{issue.URL})
-	al.publishIssueCreatedSummary(ctx, "delegation", record.DelegationID, issue.URL)
 	return result
 }
 

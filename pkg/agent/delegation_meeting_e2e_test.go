@@ -131,17 +131,6 @@ func TestEndToEndDelegationMeetingWorkflowUsesFakesAndPreservesBoundaries(t *tes
 		}
 	}
 
-	issues, comments = github.snapshot()
-	if len(issues) != 1 {
-		t.Fatalf("GitHub issues = %d, want 1 executable meeting issue", len(issues))
-	}
-	if len(comments) != 2 {
-		t.Fatalf("GitHub comments = %d, want participant comments", len(comments))
-	}
-	if strings.Contains(issues[0].Body, "Consolidate this chaired meeting") {
-		t.Fatalf("GitHub issue contains raw internal chair prompt:\n%s", issues[0].Body)
-	}
-
 	records, err := al.delegationRecords.List(context.Background(), AgentDelegationRecordQuery{IncludePrivateAll: true})
 	if err != nil {
 		t.Fatalf("delegationRecords.List() error = %v", err)
@@ -166,6 +155,7 @@ func TestEndToEndDelegationMeetingWorkflowUsesFakesAndPreservesBoundaries(t *tes
 		t.Fatalf("meeting records = %d, want 1", len(meetings))
 	}
 	meeting := meetings[0]
+	meeting = waitForMeetingGitHubStatus(t, al, meeting.MeetingID, AgentGitHubArtifactStatusCreated)
 	if meeting.SponsorAgentID != "li-ceo" || meeting.ChairAgentID != "li-cro" {
 		t.Fatalf("meeting sponsor/chair = %s/%s, want li-ceo/li-cro", meeting.SponsorAgentID, meeting.ChairAgentID)
 	}
@@ -174,6 +164,16 @@ func TestEndToEndDelegationMeetingWorkflowUsesFakesAndPreservesBoundaries(t *tes
 	}
 	if meeting.GitHubArtifact == nil || meeting.GitHubArtifact.Status != AgentGitHubArtifactStatusCreated {
 		t.Fatalf("meeting GitHub artifact = %#v, want created", meeting.GitHubArtifact)
+	}
+	issues, comments = github.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("GitHub issues = %d, want 1 executable meeting issue", len(issues))
+	}
+	if len(comments) != 2 {
+		t.Fatalf("GitHub comments = %d, want participant comments", len(comments))
+	}
+	if strings.Contains(issues[0].Body, "Consolidate this chaired meeting") {
+		t.Fatalf("GitHub issue contains raw internal chair prompt:\n%s", issues[0].Body)
 	}
 
 	calls := strings.Join(provider.snapshot(), "\n---\n")

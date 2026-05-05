@@ -252,7 +252,7 @@ run_verification() {
   verification_log="$LOG_DIR/verify-$TASK-$(date +%Y%m%d%H%M%S).log"
   extract_verification_script "$verification_script" || return 1
   log "running task verification commands"
-  if ! bash "$verification_script" > "$verification_log" 2>&1; then
+  if ! env -u PICOCLAW_HOME -u PICOCLAW_CONFIG bash "$verification_script" > "$verification_log" 2>&1; then
     sed 's/^/[verify] /' "$verification_log" | tail -220
     return 1
   fi

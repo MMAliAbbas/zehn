@@ -31,18 +31,19 @@ const (
 )
 
 type AgentDelegationRecord struct {
-	DelegationID  string                       `json:"delegation_id"`
-	Status        AgentDelegationStatus        `json:"status"`
-	ParentAgentID string                       `json:"parent_agent_id"`
-	TargetAgentID string                       `json:"target_agent_id"`
-	Request       AgentDelegationRecordRequest `json:"request"`
-	CreatedAt     time.Time                    `json:"created_at"`
-	UpdatedAt     time.Time                    `json:"updated_at"`
-	StartedAt     *time.Time                   `json:"started_at,omitempty"`
-	CompletedAt   *time.Time                   `json:"completed_at,omitempty"`
-	Result        *AgentDelegationRecordResult `json:"result,omitempty"`
-	Error         *AgentDelegationRecordError  `json:"error,omitempty"`
-	DurableMemory *AgentDelegationMemoryWrite  `json:"durable_memory,omitempty"`
+	DelegationID   string                       `json:"delegation_id"`
+	Status         AgentDelegationStatus        `json:"status"`
+	ParentAgentID  string                       `json:"parent_agent_id"`
+	TargetAgentID  string                       `json:"target_agent_id"`
+	Request        AgentDelegationRecordRequest `json:"request"`
+	CreatedAt      time.Time                    `json:"created_at"`
+	UpdatedAt      time.Time                    `json:"updated_at"`
+	StartedAt      *time.Time                   `json:"started_at,omitempty"`
+	CompletedAt    *time.Time                   `json:"completed_at,omitempty"`
+	Result         *AgentDelegationRecordResult `json:"result,omitempty"`
+	Error          *AgentDelegationRecordError  `json:"error,omitempty"`
+	DurableMemory  *AgentDelegationMemoryWrite  `json:"durable_memory,omitempty"`
+	GitHubArtifact *AgentGitHubArtifactWrite    `json:"github_artifact,omitempty"`
 }
 
 type AgentDelegationRecordQuery struct {
@@ -193,6 +194,22 @@ func (s *DelegationRecordStore) RecordMemoryWrite(
 		write.Error = s.redact(write.Error)
 		write.UpdatedAt = now
 		rec.DurableMemory = &write
+	})
+}
+
+func (s *DelegationRecordStore) RecordGitHubArtifact(
+	ctx context.Context,
+	delegationID string,
+	write AgentGitHubArtifactWrite,
+	artifactRefs []string,
+) error {
+	return s.update(ctx, delegationID, func(rec *AgentDelegationRecord, now time.Time) {
+		write.UpdatedAt = now
+		rec.GitHubArtifact = &write
+		rec.Request.ArtifactRefs = appendUniqueRefs(rec.Request.ArtifactRefs, artifactRefs...)
+		if rec.Result != nil {
+			rec.Result.ArtifactRefs = appendUniqueRefs(rec.Result.ArtifactRefs, artifactRefs...)
+		}
 	})
 }
 

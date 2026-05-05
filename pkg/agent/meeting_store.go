@@ -27,27 +27,28 @@ const (
 )
 
 type AgentMeetingRecord struct {
-	MeetingID        string                 `json:"meeting_id"`
-	Status           AgentMeetingStatus     `json:"status"`
-	Title            string                 `json:"title"`
-	SponsorAgentID   string                 `json:"sponsor_agent_id"`
-	ChairAgentID     string                 `json:"chair_agent_id"`
-	Participants     []string               `json:"participants"`
-	Goal             string                 `json:"goal"`
-	Constraints      []string               `json:"constraints,omitempty"`
-	Notes            string                 `json:"notes,omitempty"`
-	Recommendation   string                 `json:"recommendation,omitempty"`
-	Timeline         []string               `json:"timeline,omitempty"`
-	Risks            []string               `json:"risks,omitempty"`
-	Approvals        []string               `json:"approvals,omitempty"`
-	FollowUps        []string               `json:"follow_ups,omitempty"`
-	ArtifactRefs     []string               `json:"artifact_refs,omitempty"`
-	ParticipantTurns []AgentMeetingTurn     `json:"participant_turns,omitempty"`
-	ChairTurn        *AgentMeetingChairTurn `json:"chair_turn,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
-	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
-	Error            string                 `json:"error,omitempty"`
+	MeetingID        string                    `json:"meeting_id"`
+	Status           AgentMeetingStatus        `json:"status"`
+	Title            string                    `json:"title"`
+	SponsorAgentID   string                    `json:"sponsor_agent_id"`
+	ChairAgentID     string                    `json:"chair_agent_id"`
+	Participants     []string                  `json:"participants"`
+	Goal             string                    `json:"goal"`
+	Constraints      []string                  `json:"constraints,omitempty"`
+	Notes            string                    `json:"notes,omitempty"`
+	Recommendation   string                    `json:"recommendation,omitempty"`
+	Timeline         []string                  `json:"timeline,omitempty"`
+	Risks            []string                  `json:"risks,omitempty"`
+	Approvals        []string                  `json:"approvals,omitempty"`
+	FollowUps        []string                  `json:"follow_ups,omitempty"`
+	ArtifactRefs     []string                  `json:"artifact_refs,omitempty"`
+	ParticipantTurns []AgentMeetingTurn        `json:"participant_turns,omitempty"`
+	ChairTurn        *AgentMeetingChairTurn    `json:"chair_turn,omitempty"`
+	GitHubArtifact   *AgentGitHubArtifactWrite `json:"github_artifact,omitempty"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
+	CompletedAt      *time.Time                `json:"completed_at,omitempty"`
+	Error            string                    `json:"error,omitempty"`
 }
 
 type AgentMeetingTurn struct {
@@ -145,6 +146,19 @@ func (s *MeetingRecordStore) Failed(ctx context.Context, meetingID string, err e
 		rec.Status = AgentMeetingStatusFailed
 		rec.CompletedAt = &now
 		rec.Error = s.redact(err.Error())
+	})
+}
+
+func (s *MeetingRecordStore) RecordGitHubArtifact(
+	ctx context.Context,
+	meetingID string,
+	write AgentGitHubArtifactWrite,
+	artifactRefs []string,
+) error {
+	return s.update(ctx, meetingID, func(rec *AgentMeetingRecord, now time.Time) {
+		write.UpdatedAt = now
+		rec.GitHubArtifact = &write
+		rec.ArtifactRefs = appendUniqueRefs(rec.ArtifactRefs, artifactRefs...)
 	})
 }
 

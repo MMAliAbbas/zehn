@@ -125,6 +125,10 @@ func (al *AgentLoop) RunAgentMeeting(
 	if err != nil {
 		return AgentMeetingOutcome{}, record, err
 	}
+	record, err = al.maybePublishMeetingGitHubArtifact(ctx, record, outcome)
+	if err != nil {
+		return AgentMeetingOutcome{}, record, err
+	}
 	return outcome, record, nil
 }
 

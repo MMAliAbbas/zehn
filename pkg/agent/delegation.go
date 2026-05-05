@@ -276,6 +276,7 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 	if err := al.delegationRecords.Completed(ctx, record.DelegationID, result); err != nil {
 		return result, err
 	}
+	result = al.maybePublishDelegationGitHubArtifact(ctx, record, req, result)
 	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
 		return result, err
 	}

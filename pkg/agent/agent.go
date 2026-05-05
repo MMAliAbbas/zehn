@@ -38,6 +38,7 @@ type AgentLoop struct {
 	state             *state.Manager
 	delegationRecords *DelegationRecordStore
 	meetingRecords    *MeetingRecordStore
+	githubArtifacts   AgentGitHubArtifactWriter
 
 	// Event system (from Incoming)
 	eventBus *EventBus

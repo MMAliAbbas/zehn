@@ -132,12 +132,15 @@ while true; do
 
   run_count=$((run_count + 1))
   iteration_log="$LOG_DIR/zehn-feature-iteration-$run_count-$(date +%Y%m%d%H%M%S).log"
+  iteration_runner="$RUN_DIR/run-one-zehn-feature-task-$run_count-$(date +%Y%m%d%H%M%S).sh"
   log "starting Zehn feature runner iteration $run_count"
+  cp "$RUNNER" "$iteration_runner" || die "cannot snapshot runner: $RUNNER"
+  chmod +x "$iteration_runner" || die "cannot make runner snapshot executable: $iteration_runner"
 
   if [ "${#PASS_ARGS[@]}" -gt 0 ]; then
-    "$RUNNER" "${PASS_ARGS[@]}" > "$iteration_log" 2>&1
+    "$iteration_runner" "${PASS_ARGS[@]}" > "$iteration_log" 2>&1
   else
-    "$RUNNER" > "$iteration_log" 2>&1
+    "$iteration_runner" > "$iteration_log" 2>&1
   fi
   status=$?
   sed 's/^/[runner] /' "$iteration_log" | tee -a "$LOOP_LOG"

@@ -42,6 +42,7 @@ type AgentDelegationRecord struct {
 	CompletedAt   *time.Time                   `json:"completed_at,omitempty"`
 	Result        *AgentDelegationRecordResult `json:"result,omitempty"`
 	Error         *AgentDelegationRecordError  `json:"error,omitempty"`
+	DurableMemory *AgentDelegationMemoryWrite  `json:"durable_memory,omitempty"`
 }
 
 type AgentDelegationRecordQuery struct {
@@ -74,6 +75,22 @@ type AgentDelegationRecordResult struct {
 type AgentDelegationRecordError struct {
 	Message string `json:"message"`
 	Type    string `json:"type,omitempty"`
+}
+
+type AgentDelegationMemoryStatus string
+
+const (
+	AgentDelegationMemoryStatusUnavailable AgentDelegationMemoryStatus = "unavailable"
+	AgentDelegationMemoryStatusWritten     AgentDelegationMemoryStatus = "written"
+	AgentDelegationMemoryStatusFailed      AgentDelegationMemoryStatus = "failed"
+)
+
+type AgentDelegationMemoryWrite struct {
+	Provider  string                      `json:"provider"`
+	Status    AgentDelegationMemoryStatus `json:"status"`
+	MemoryID  string                      `json:"memory_id,omitempty"`
+	Error     string                      `json:"error,omitempty"`
+	UpdatedAt time.Time                   `json:"updated_at"`
 }
 
 func (r AgentDelegationRecord) Filename() string {
@@ -162,6 +179,20 @@ func (s *DelegationRecordStore) Failed(ctx context.Context, delegationID string,
 			Message: s.redact(err.Error()),
 			Type:    fmt.Sprintf("%T", err),
 		}
+	})
+}
+
+func (s *DelegationRecordStore) RecordMemoryWrite(
+	ctx context.Context,
+	delegationID string,
+	write AgentDelegationMemoryWrite,
+) error {
+	return s.update(ctx, delegationID, func(rec *AgentDelegationRecord, now time.Time) {
+		write.Provider = s.redact(write.Provider)
+		write.MemoryID = s.redact(write.MemoryID)
+		write.Error = s.redact(write.Error)
+		write.UpdatedAt = now
+		rec.DurableMemory = &write
 	})
 }
 

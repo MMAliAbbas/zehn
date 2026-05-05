@@ -161,6 +161,9 @@ func (al *AgentLoop) prepareAgentDelegation(
 	if err != nil {
 		return AgentDelegationRecord{}, req, AgentDelegationResult{}, err
 	}
+	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
+		return record, req, AgentDelegationResult{}, err
+	}
 	result := AgentDelegationResult{
 		DelegationID:  record.DelegationID,
 		ParentAgentID: parentAgentID,
@@ -176,6 +179,7 @@ func (al *AgentLoop) prepareAgentDelegation(
 			targetAgentID,
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
 		return record, req, result, err
 	}
 
@@ -187,6 +191,7 @@ func (al *AgentLoop) prepareAgentDelegation(
 			targetAgentID,
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
 		return record, req, result, err
 	}
 	return record, req, result, nil
@@ -206,6 +211,7 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 			req.TargetAgentID,
 		)
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
 		return result, err
 	}
 
@@ -246,6 +252,9 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 	if err := al.delegationRecords.Running(ctx, record.DelegationID); err != nil {
 		return result, err
 	}
+	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
+		return result, err
+	}
 
 	turnScope := al.newTurnEventScope(
 		target.ID,
@@ -261,9 +270,13 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 	result.Status = turnRes.status
 	if err != nil {
 		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
 		return result, err
 	}
 	if err := al.delegationRecords.Completed(ctx, record.DelegationID, result); err != nil {
+		return result, err
+	}
+	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
 		return result, err
 	}
 	return result, nil

@@ -34,6 +34,9 @@ func DefaultConfig() *Config {
 				SummarizeMessageThreshold: 20,
 				SummarizeTokenPercent:     75,
 				SteeringMode:              "one-at-a-time",
+				AsyncDelegation: AsyncDelegationConfig{
+					MaxConcurrent: 4,
+				},
 				ToolFeedback: ToolFeedbackConfig{
 					Enabled:          false,
 					MaxArgsLength:    300,

@@ -17,6 +17,8 @@ var (
 	ErrAgentDelegationPermissionDenied = errors.New("agent delegation permission denied")
 	ErrAgentDelegationTargetNotFound   = errors.New("agent delegation target not found")
 	ErrAgentDelegationInvalidRequest   = errors.New("invalid agent delegation request")
+	ErrAgentDelegationExecutorFull     = errors.New("agent delegation executor at capacity")
+	ErrAgentDelegationExecutorClosed   = errors.New("agent delegation executor closed")
 )
 
 // AgentDelegationRequest describes a single delegated turn from one configured
@@ -65,13 +67,22 @@ func (al *AgentLoop) RunAgentDelegationAsync(
 	ctx context.Context,
 	req AgentDelegationRequest,
 ) (AgentDelegationResult, error) {
-	record, req, result, err := al.prepareAgentDelegation(ctx, req, "async")
+	recordCtx := ctx
+	if err := ctx.Err(); err != nil {
+		recordCtx = context.WithoutCancel(ctx)
+	}
+	record, req, result, err := al.prepareAgentDelegation(recordCtx, req, "async")
 	if err != nil {
 		return result, err
 	}
-	go func() {
-		_, _ = al.runPreparedAgentDelegation(context.Background(), req, record, result)
-	}()
+	if err := al.asyncDelegations.Submit(ctx, func(runCtx context.Context) {
+		_, _ = al.runPreparedAgentDelegation(runCtx, req, record, result)
+	}); err != nil {
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
+		return result, err
+	}
 	return result, nil
 }
 

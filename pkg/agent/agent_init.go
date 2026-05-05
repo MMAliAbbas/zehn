@@ -55,6 +55,10 @@ func NewAgentLoop(
 	if workerPoolSize <= 0 {
 		workerPoolSize = 1
 	}
+	asyncDelegationLimit := cfg.Agents.Defaults.AsyncDelegation.MaxConcurrent
+	if asyncDelegationLimit <= 0 {
+		asyncDelegationLimit = 4
+	}
 
 	al := &AgentLoop{
 		bus:      msgBus,
@@ -65,6 +69,7 @@ func NewAgentLoop(
 			defaultDelegationRecordStoreDir(cfg),
 			delegationRecordRedactor(cfg),
 		),
+		asyncDelegations: newAsyncDelegationExecutor(asyncDelegationLimit),
 		meetingRecords: NewMeetingRecordStore(
 			defaultMeetingRecordStoreDir(cfg),
 			delegationRecordRedactor(cfg),

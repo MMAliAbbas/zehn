@@ -37,6 +37,7 @@ type AgentLoop struct {
 	registry          *AgentRegistry
 	state             *state.Manager
 	delegationRecords *DelegationRecordStore
+	asyncDelegations  *asyncDelegationExecutor
 	meetingRecords    *MeetingRecordStore
 	githubArtifacts   AgentGitHubArtifactWriter
 
@@ -273,6 +274,10 @@ func (al *AgentLoop) Stop() {
 
 // Close releases resources held by agent session stores. Call after Stop.
 func (al *AgentLoop) Close() {
+	if al.asyncDelegations != nil {
+		al.asyncDelegations.Close()
+	}
+
 	mcpManager := al.mcp.takeManager()
 
 	if mcpManager != nil {

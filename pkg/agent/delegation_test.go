@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -240,6 +241,162 @@ func TestRunAgentDelegationAsync_ReturnsIDAndPersistsCompletedResult(t *testing.
 	}
 }
 
+func TestRunAgentDelegationAsync_RejectsWhenExecutorAtCapacity(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	cfg.Agents.Defaults.AsyncDelegation.MaxConcurrent = 1
+	provider := &countingBlockingDelegationProvider{
+		started: make(chan int, 2),
+		release: make(chan struct{}),
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	defer al.Close()
+
+	first, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "first async task",
+	})
+	if err != nil {
+		t.Fatalf("first RunAgentDelegationAsync() error = %v", err)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first async delegation did not start")
+	}
+
+	rejected, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "second async task",
+	})
+	if !errors.Is(err, ErrAgentDelegationExecutorFull) {
+		t.Fatalf("second RunAgentDelegationAsync() error = %v, want ErrAgentDelegationExecutorFull", err)
+	}
+	if rejected.DelegationID == "" {
+		t.Fatal("rejected delegation ID is empty")
+	}
+	rec, err := al.delegationRecords.Get(context.Background(), rejected.DelegationID)
+	if err != nil {
+		t.Fatalf("Get(rejected) error = %v", err)
+	}
+	if rec.Status != AgentDelegationStatusFailed {
+		t.Fatalf("rejected status = %q, want failed", rec.Status)
+	}
+	if rec.Error == nil || !strings.Contains(rec.Error.Message, "capacity") {
+		t.Fatalf("rejected error = %#v, want capacity message", rec.Error)
+	}
+
+	close(provider.release)
+	waitForDelegationStatus(t, al, first.DelegationID, AgentDelegationStatusCompleted)
+}
+
+func TestRunAgentDelegationAsync_RecordsCancelledWhenParentContextCanceledBeforeEnqueue(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	defer al.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := al.RunAgentDelegationAsync(ctx, AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "cancel before enqueue",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunAgentDelegationAsync() error = %v, want context.Canceled", err)
+	}
+	if result.DelegationID == "" {
+		t.Fatal("cancelled delegation ID is empty")
+	}
+	rec, err := al.delegationRecords.Get(context.Background(), result.DelegationID)
+	if err != nil {
+		t.Fatalf("Get(cancelled) error = %v", err)
+	}
+	if rec.Status != AgentDelegationStatusCancelled {
+		t.Fatalf("Status = %q, want cancelled", rec.Status)
+	}
+}
+
+func TestRunAgentDelegationAsync_RecordsFailureAfterEnqueue(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	providerErr := errors.New("target failed after enqueue")
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &failingDelegationProvider{err: providerErr})
+	defer al.Close()
+
+	result, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "fail after enqueue",
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegationAsync() error = %v", err)
+	}
+
+	rec := waitForDelegationStatus(t, al, result.DelegationID, AgentDelegationStatusFailed)
+	if rec.Error == nil || !strings.Contains(rec.Error.Message, providerErr.Error()) {
+		t.Fatalf("Error = %#v, want provider failure", rec.Error)
+	}
+}
+
+func TestRunAgentDelegationAsync_CloseCancelsAcceptedWorkAndRejectsNewWork(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	cfg.Agents.Defaults.AsyncDelegation.MaxConcurrent = 1
+	provider := &countingBlockingDelegationProvider{
+		started: make(chan int, 2),
+		release: make(chan struct{}),
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+
+	result, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "cancel on close",
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegationAsync() error = %v", err)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("async delegation did not start")
+	}
+
+	al.Close()
+	waitForDelegationStatus(t, al, result.DelegationID, AgentDelegationStatusCancelled)
+
+	rejected, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "after close",
+	})
+	if !errors.Is(err, ErrAgentDelegationExecutorClosed) {
+		t.Fatalf("RunAgentDelegationAsync() after Close error = %v, want ErrAgentDelegationExecutorClosed", err)
+	}
+	if rejected.DelegationID == "" {
+		t.Fatal("closed-loop rejected delegation ID is empty")
+	}
+	rec, err := al.delegationRecords.Get(context.Background(), rejected.DelegationID)
+	if err != nil {
+		t.Fatalf("Get(closed rejected) error = %v", err)
+	}
+	if rec.Status != AgentDelegationStatusFailed {
+		t.Fatalf("closed-loop rejected status = %q, want failed", rec.Status)
+	}
+}
+
 func TestRunAgentDelegation_PublishesDiscordVisibilitySummariesWhenEnabled(t *testing.T) {
 	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
 		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
@@ -331,6 +488,58 @@ func (p *blockingDelegationProvider) Chat(
 
 func (p *blockingDelegationProvider) GetDefaultModel() string {
 	return "provider-default"
+}
+
+type countingBlockingDelegationProvider struct {
+	calls   atomic.Int64
+	started chan int
+	release chan struct{}
+}
+
+func (p *countingBlockingDelegationProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	call := int(p.calls.Add(1))
+	p.started <- call
+	select {
+	case <-p.release:
+		return &providers.LLMResponse{Content: "async target answer", FinishReason: "stop"}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (p *countingBlockingDelegationProvider) GetDefaultModel() string {
+	return "provider-default"
+}
+
+func waitForDelegationStatus(
+	t *testing.T,
+	al *AgentLoop,
+	delegationID string,
+	want AgentDelegationStatus,
+) AgentDelegationRecord {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		rec, err := al.delegationRecords.Get(context.Background(), delegationID)
+		if err != nil {
+			t.Fatalf("Get(%s) error = %v", delegationID, err)
+		}
+		if rec.Status == want {
+			return rec
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("delegation status = %q, want %q", rec.Status, want)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
 
 func writeDelegationPromptFile(t *testing.T, dir, name, content string) {

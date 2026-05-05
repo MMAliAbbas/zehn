@@ -222,6 +222,8 @@ assert_staged_changes_scoped() {
   while IFS= read -r line; do
     allowed+=("$line")
   done < <(extract_allowed_paths)
+  allowed+=("${STATUS_DOC#$ROOT/}")
+  allowed+=("${FAILURE_DOC#$ROOT/}")
 
   staged=()
   while IFS= read -r line; do
@@ -439,6 +441,13 @@ commit_changes() {
         fi
         ;;
     esac
+  done
+
+  for ledger in "$STATUS_DOC" "$FAILURE_DOC"; do
+    rel="${ledger#$ROOT/}"
+    if [ -e "$ledger" ] || git -C "$ROOT" ls-files --error-unmatch "$rel" >/dev/null 2>&1; then
+      git -C "$ROOT" add -- "$rel" || return 1
+    fi
   done
 
   assert_staged_changes_scoped || return 1

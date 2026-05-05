@@ -110,6 +110,198 @@ func TestDelegationYaadMemoryFailureDoesNotLoseResult(t *testing.T) {
 	}
 }
 
+func TestDelegationYaadMemorySkipsIntermediateStatesAndWritesCompletedOnce(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, nil)
+	al := NewAgentLoop(cfg, nil, &mockProvider{})
+	al.delegationRecords = NewDelegationRecordStore(t.TempDir(), nil)
+
+	rec, err := al.delegationRecords.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "complete with one durable memory",
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+
+	writer := &recordingDelegationMemoryWriter{}
+	restoreWriter := overrideDelegationMemoryWriterForTest(t, writer)
+	defer restoreWriter()
+	restoreStrict := overrideDelegationMemoryStrictForTest(t, false)
+	defer restoreStrict()
+
+	if err := al.persistDelegationMemory(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("persistDelegationMemory(requested) error = %v", err)
+	}
+	if err := al.delegationRecords.Running(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("Running() error = %v", err)
+	}
+	if err := al.persistDelegationMemory(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("persistDelegationMemory(running) error = %v", err)
+	}
+	if err := al.delegationRecords.Completed(context.Background(), rec.DelegationID, AgentDelegationResult{
+		Content: "final answer",
+		Status:  TurnEndStatusCompleted,
+	}); err != nil {
+		t.Fatalf("Completed() error = %v", err)
+	}
+	if err := al.persistDelegationMemory(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("persistDelegationMemory(completed) error = %v", err)
+	}
+	if err := al.persistDelegationMemory(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("persistDelegationMemory(completed retry) error = %v", err)
+	}
+
+	writer.mu.Lock()
+	written := append([]AgentDelegationRecord(nil), writer.records...)
+	writer.mu.Unlock()
+	if len(written) != 1 {
+		t.Fatalf("Yaad memory writes = %d, want 1", len(written))
+	}
+	if written[0].Status != AgentDelegationStatusCompleted {
+		t.Fatalf("written status = %q, want completed", written[0].Status)
+	}
+
+	loaded, err := al.delegationRecords.Get(context.Background(), rec.DelegationID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if loaded.DurableMemory == nil {
+		t.Fatal("DurableMemory is nil, want skipped states and final write metadata")
+	}
+	if loaded.DurableMemory.Status != AgentDelegationMemoryStatusWritten {
+		t.Fatalf("DurableMemory.Status = %q, want written", loaded.DurableMemory.Status)
+	}
+	if got, want := loaded.DurableMemory.SkippedStatuses, []AgentDelegationStatus{
+		AgentDelegationStatusRequested,
+		AgentDelegationStatusRunning,
+		AgentDelegationStatusCompleted,
+	}; !equalDelegationStatuses(got, want) {
+		t.Fatalf("SkippedStatuses = %#v, want %#v", got, want)
+	}
+}
+
+func TestRunAgentDelegationYaadMemoryWritesOnceForNormalFlow(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, nil, &recordingDelegationProvider{})
+
+	writer := &recordingDelegationMemoryWriter{}
+	restoreWriter := overrideDelegationMemoryWriterForTest(t, writer)
+	defer restoreWriter()
+	restoreStrict := overrideDelegationMemoryStrictForTest(t, false)
+	defer restoreStrict()
+
+	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "complete normal delegation",
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+
+	writer.mu.Lock()
+	written := append([]AgentDelegationRecord(nil), writer.records...)
+	writer.mu.Unlock()
+	if len(written) != 1 {
+		t.Fatalf("Yaad memory writes = %d, want 1", len(written))
+	}
+	if written[0].DelegationID != result.DelegationID {
+		t.Fatalf("written delegation ID = %q, want %q", written[0].DelegationID, result.DelegationID)
+	}
+	if written[0].Status != AgentDelegationStatusCompleted {
+		t.Fatalf("written status = %q, want completed", written[0].Status)
+	}
+
+	loaded, err := al.delegationRecords.Get(context.Background(), result.DelegationID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got, want := loaded.DurableMemory.SkippedStatuses, []AgentDelegationStatus{
+		AgentDelegationStatusRequested,
+		AgentDelegationStatusRunning,
+	}; !equalDelegationStatuses(got, want) {
+		t.Fatalf("SkippedStatuses = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelegationYaadMemoryStrictModeAllowsSkippedIntermediateStates(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, nil)
+	al := NewAgentLoop(cfg, nil, &mockProvider{})
+	al.delegationRecords = NewDelegationRecordStore(t.TempDir(), nil)
+
+	rec, err := al.delegationRecords.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "strict mode intermediate state",
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+
+	restoreWriter := overrideDelegationMemoryWriterForTest(t, nil)
+	defer restoreWriter()
+	restoreStrict := overrideDelegationMemoryStrictForTest(t, true)
+	defer restoreStrict()
+
+	if err := al.persistDelegationMemory(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("persistDelegationMemory(requested strict) error = %v, want skipped state without Yaad", err)
+	}
+
+	loaded, err := al.delegationRecords.Get(context.Background(), rec.DelegationID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if loaded.DurableMemory == nil || loaded.DurableMemory.Status != AgentDelegationMemoryStatusSkipped {
+		t.Fatalf("DurableMemory = %#v, want skipped metadata", loaded.DurableMemory)
+	}
+	if got, want := loaded.DurableMemory.SkippedStatuses, []AgentDelegationStatus{AgentDelegationStatusRequested}; !equalDelegationStatuses(got, want) {
+		t.Fatalf("SkippedStatuses = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelegationYaadMemoryStrictModeRequiresYaadForTerminalStates(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, nil)
+	al := NewAgentLoop(cfg, nil, &mockProvider{})
+	al.delegationRecords = NewDelegationRecordStore(t.TempDir(), nil)
+
+	rec, err := al.delegationRecords.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "strict mode terminal state",
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+	if err := al.delegationRecords.Completed(context.Background(), rec.DelegationID, AgentDelegationResult{
+		Content: "final answer",
+		Status:  TurnEndStatusCompleted,
+	}); err != nil {
+		t.Fatalf("Completed() error = %v", err)
+	}
+
+	restoreWriter := overrideDelegationMemoryWriterForTest(t, nil)
+	defer restoreWriter()
+	restoreStrict := overrideDelegationMemoryStrictForTest(t, true)
+	defer restoreStrict()
+
+	err = al.persistDelegationMemory(context.Background(), rec.DelegationID)
+	if err == nil || !strings.Contains(err.Error(), "writer unavailable") {
+		t.Fatalf("persistDelegationMemory(completed strict) error = %v, want unavailable Yaad error", err)
+	}
+
+	loaded, err := al.delegationRecords.Get(context.Background(), rec.DelegationID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if loaded.DurableMemory == nil || loaded.DurableMemory.Status != AgentDelegationMemoryStatusUnavailable {
+		t.Fatalf("DurableMemory = %#v, want unavailable metadata", loaded.DurableMemory)
+	}
+}
+
 func TestDelegationYaadMemoryReceivesRedactedRecord(t *testing.T) {
 	secret := "sk-delegation-memory-secret"
 	cfg := delegationConfigWithAgents(t, nil)
@@ -299,4 +491,16 @@ func mustMarshalDelegationRecordForTest(t *testing.T, rec AgentDelegationRecord)
 		t.Fatalf("Marshal() error = %v", err)
 	}
 	return data
+}
+
+func equalDelegationStatuses(a, b []AgentDelegationStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

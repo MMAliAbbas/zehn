@@ -85,6 +85,27 @@ func (al *AgentLoop) persistDelegationMemory(ctx context.Context, delegationID s
 	if al == nil || al.delegationRecords == nil {
 		return nil
 	}
+	rec, err := al.delegationRecords.Get(ctx, delegationID)
+	if err != nil {
+		return err
+	}
+	if !shouldWriteDelegationMemory(rec) {
+		return al.delegationRecords.RecordMemorySkipped(
+			context.Background(),
+			delegationID,
+			rec.Status,
+			"yaad delegation memory skipped until terminal status",
+		)
+	}
+	if rec.DurableMemory != nil && rec.DurableMemory.Status == AgentDelegationMemoryStatusWritten {
+		return al.delegationRecords.RecordMemorySkipped(
+			context.Background(),
+			delegationID,
+			rec.Status,
+			"yaad delegation memory already written; no update or upsert tool is configured",
+		)
+	}
+
 	strict := delegationMemoryStrictForAgentLoop(al)
 	writer := delegationMemoryWriterForAgentLoop(al)
 	if writer == nil {
@@ -100,11 +121,6 @@ func (al *AgentLoop) persistDelegationMemory(ctx context.Context, delegationID s
 			return errors.New(write.Error)
 		}
 		return nil
-	}
-
-	rec, err := al.delegationRecords.Get(ctx, delegationID)
-	if err != nil {
-		return err
 	}
 	write, err := writer.WriteDelegationMemory(ctx, rec)
 	if err != nil {
@@ -128,6 +144,15 @@ func (al *AgentLoop) persistDelegationMemory(ctx context.Context, delegationID s
 		write.Status = AgentDelegationMemoryStatusWritten
 	}
 	return al.delegationRecords.RecordMemoryWrite(ctx, delegationID, write)
+}
+
+func shouldWriteDelegationMemory(rec AgentDelegationRecord) bool {
+	switch rec.Status {
+	case AgentDelegationStatusCompleted, AgentDelegationStatusFailed, AgentDelegationStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func yaadDelegationMemoryServerName(manager *picoclawmcp.Manager) string {

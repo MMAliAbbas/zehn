@@ -189,6 +189,7 @@ func TestRunAgentDelegationAsync_ReturnsIDAndPersistsCompletedResult(t *testing.
 		release: make(chan struct{}),
 	}
 	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	defer al.Close()
 
 	result, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
 		ParentAgentID: "parent",

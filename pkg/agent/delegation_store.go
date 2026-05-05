@@ -84,14 +84,16 @@ const (
 	AgentDelegationMemoryStatusUnavailable AgentDelegationMemoryStatus = "unavailable"
 	AgentDelegationMemoryStatusWritten     AgentDelegationMemoryStatus = "written"
 	AgentDelegationMemoryStatusFailed      AgentDelegationMemoryStatus = "failed"
+	AgentDelegationMemoryStatusSkipped     AgentDelegationMemoryStatus = "skipped"
 )
 
 type AgentDelegationMemoryWrite struct {
-	Provider  string                      `json:"provider"`
-	Status    AgentDelegationMemoryStatus `json:"status"`
-	MemoryID  string                      `json:"memory_id,omitempty"`
-	Error     string                      `json:"error,omitempty"`
-	UpdatedAt time.Time                   `json:"updated_at"`
+	Provider        string                      `json:"provider"`
+	Status          AgentDelegationMemoryStatus `json:"status"`
+	MemoryID        string                      `json:"memory_id,omitempty"`
+	Error           string                      `json:"error,omitempty"`
+	SkippedStatuses []AgentDelegationStatus     `json:"skipped_statuses,omitempty"`
+	UpdatedAt       time.Time                   `json:"updated_at"`
 }
 
 func (r AgentDelegationRecord) Filename() string {
@@ -189,9 +191,46 @@ func (s *DelegationRecordStore) RecordMemoryWrite(
 	write AgentDelegationMemoryWrite,
 ) error {
 	return s.update(ctx, delegationID, func(rec *AgentDelegationRecord, now time.Time) {
+		if rec.DurableMemory != nil {
+			write.SkippedStatuses = appendUniqueDelegationStatuses(
+				rec.DurableMemory.SkippedStatuses,
+				write.SkippedStatuses...,
+			)
+		}
 		write.Provider = s.redact(write.Provider)
 		write.MemoryID = s.redact(write.MemoryID)
 		write.Error = s.redact(write.Error)
+		write.UpdatedAt = now
+		rec.DurableMemory = &write
+	})
+}
+
+func (s *DelegationRecordStore) RecordMemorySkipped(
+	ctx context.Context,
+	delegationID string,
+	status AgentDelegationStatus,
+	reason string,
+) error {
+	return s.update(ctx, delegationID, func(rec *AgentDelegationRecord, now time.Time) {
+		write := AgentDelegationMemoryWrite{
+			Provider: "yaad",
+			Status:   AgentDelegationMemoryStatusSkipped,
+			Error:    reason,
+		}
+		if rec.DurableMemory != nil {
+			write = *rec.DurableMemory
+			if write.Provider == "" {
+				write.Provider = "yaad"
+			}
+			if write.Status != AgentDelegationMemoryStatusWritten {
+				write.Status = AgentDelegationMemoryStatusSkipped
+				write.Error = reason
+			}
+		}
+		write.Provider = s.redact(write.Provider)
+		write.MemoryID = s.redact(write.MemoryID)
+		write.Error = s.redact(write.Error)
+		write.SkippedStatuses = appendUniqueDelegationStatuses(write.SkippedStatuses, status)
 		write.UpdatedAt = now
 		rec.DurableMemory = &write
 	})
@@ -425,6 +464,23 @@ func (s *DelegationRecordStore) redactSessionScope(scope *session.SessionScope) 
 		redacted.Values[s.redact(key)] = s.redact(value)
 	}
 	return redacted
+}
+
+func appendUniqueDelegationStatuses(
+	values []AgentDelegationStatus,
+	additions ...AgentDelegationStatus,
+) []AgentDelegationStatus {
+	out := append([]AgentDelegationStatus(nil), values...)
+	for _, addition := range additions {
+		if addition == "" {
+			continue
+		}
+		if slices.Contains(out, addition) {
+			continue
+		}
+		out = append(out, addition)
+	}
+	return out
 }
 
 var delegationIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)

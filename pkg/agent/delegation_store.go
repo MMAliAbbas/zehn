@@ -31,19 +31,20 @@ const (
 )
 
 type AgentDelegationRecord struct {
-	DelegationID   string                       `json:"delegation_id"`
-	Status         AgentDelegationStatus        `json:"status"`
-	ParentAgentID  string                       `json:"parent_agent_id"`
-	TargetAgentID  string                       `json:"target_agent_id"`
-	Request        AgentDelegationRecordRequest `json:"request"`
-	CreatedAt      time.Time                    `json:"created_at"`
-	UpdatedAt      time.Time                    `json:"updated_at"`
-	StartedAt      *time.Time                   `json:"started_at,omitempty"`
-	CompletedAt    *time.Time                   `json:"completed_at,omitempty"`
-	Result         *AgentDelegationRecordResult `json:"result,omitempty"`
-	Error          *AgentDelegationRecordError  `json:"error,omitempty"`
-	DurableMemory  *AgentDelegationMemoryWrite  `json:"durable_memory,omitempty"`
-	GitHubArtifact *AgentGitHubArtifactWrite    `json:"github_artifact,omitempty"`
+	DelegationID      string                       `json:"delegation_id"`
+	Status            AgentDelegationStatus        `json:"status"`
+	ParentAgentID     string                       `json:"parent_agent_id"`
+	TargetAgentID     string                       `json:"target_agent_id"`
+	VisibleToAgentIDs []string                     `json:"visible_to_agent_ids,omitempty"`
+	Request           AgentDelegationRecordRequest `json:"request"`
+	CreatedAt         time.Time                    `json:"created_at"`
+	UpdatedAt         time.Time                    `json:"updated_at"`
+	StartedAt         *time.Time                   `json:"started_at,omitempty"`
+	CompletedAt       *time.Time                   `json:"completed_at,omitempty"`
+	Result            *AgentDelegationRecordResult `json:"result,omitempty"`
+	Error             *AgentDelegationRecordError  `json:"error,omitempty"`
+	DurableMemory     *AgentDelegationMemoryWrite  `json:"durable_memory,omitempty"`
+	GitHubArtifact    *AgentGitHubArtifactWrite    `json:"github_artifact,omitempty"`
 }
 
 type AgentDelegationRecordQuery struct {
@@ -124,10 +125,11 @@ func (s *DelegationRecordStore) Requested(ctx context.Context, req AgentDelegati
 	}
 	now := s.now().UTC()
 	rec := AgentDelegationRecord{
-		DelegationID:  s.newID(req, now),
-		Status:        AgentDelegationStatusRequested,
-		ParentAgentID: s.redact(req.ParentAgentID),
-		TargetAgentID: s.redact(req.TargetAgentID),
+		DelegationID:      s.newID(req, now),
+		Status:            AgentDelegationStatusRequested,
+		ParentAgentID:     s.redact(req.ParentAgentID),
+		TargetAgentID:     s.redact(req.TargetAgentID),
+		VisibleToAgentIDs: s.redactRefs(req.VisibleToAgentIDs),
 		Request: AgentDelegationRecordRequest{
 			Task:             s.redact(req.Task),
 			ThreadKey:        s.redact(req.ThreadKey),
@@ -357,11 +359,27 @@ func recordMatchesDelegationQuery(rec AgentDelegationRecord, query AgentDelegati
 	}
 	if !query.IncludePrivateAll {
 		visibleTo := strings.TrimSpace(query.VisibleToAgentID)
-		if visibleTo != "" && rec.ParentAgentID != visibleTo && rec.TargetAgentID != visibleTo {
+		if visibleTo == "" {
+			return false
+		}
+		if !agentDelegationRecordVisibleToAgent(rec, visibleTo) {
 			return false
 		}
 	}
 	return true
+}
+
+func agentDelegationRecordVisibleToAgent(rec AgentDelegationRecord, agentID string) bool {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false
+	}
+	if rec.ParentAgentID == agentID || rec.TargetAgentID == agentID || rec.Request.RequestedBy == agentID {
+		return true
+	}
+	return slices.ContainsFunc(rec.VisibleToAgentIDs, func(visibleAgentID string) bool {
+		return strings.TrimSpace(visibleAgentID) == agentID
+	})
 }
 
 func (s *DelegationRecordStore) write(ctx context.Context, rec AgentDelegationRecord) error {

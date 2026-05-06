@@ -23,7 +23,10 @@ func (r *fakeDelegationRecordReader) GetDelegationRecord(ctx context.Context, de
 func (r *fakeDelegationRecordReader) ListDelegationRecords(ctx context.Context, query DelegationRecordQuery) ([]DelegationRecord, error) {
 	var out []DelegationRecord
 	for _, rec := range r.records {
-		if query.VisibleToAgentID != "" && rec.ParentAgentID != query.VisibleToAgentID && rec.TargetAgentID != query.VisibleToAgentID {
+		if query.DelegationID != "" && rec.DelegationID != query.DelegationID {
+			continue
+		}
+		if query.VisibleToAgentID != "" && !delegationRecordVisibleToAgent(rec, query.VisibleToAgentID) {
 			continue
 		}
 		if query.TargetAgentID != "" && rec.TargetAgentID != query.TargetAgentID {
@@ -32,6 +35,50 @@ func (r *fakeDelegationRecordReader) ListDelegationRecords(ctx context.Context, 
 		out = append(out, rec)
 	}
 	return out, nil
+}
+
+func TestDelegationStatusTool_MissingCallerIdentityCannotListRecords(t *testing.T) {
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:  "delegation-private",
+			Status:        "running",
+			ParentAgentID: "ceo",
+			TargetAgentID: "cto",
+			Task:          "Inspect launch readiness.",
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+
+	result := tool.Execute(context.Background(), map[string]any{})
+
+	if !result.IsError {
+		t.Fatalf("expected missing caller identity to be rejected, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "calling agent identity is required") {
+		t.Fatalf("unexpected error for missing caller identity: %s", result.ForLLM)
+	}
+}
+
+func TestDelegationStatusTool_MissingCallerIdentityCannotGetByID(t *testing.T) {
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:  "delegation-private",
+			Status:        "running",
+			ParentAgentID: "ceo",
+			TargetAgentID: "cto",
+			Task:          "Inspect launch readiness.",
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+
+	result := tool.Execute(context.Background(), map[string]any{"delegation_id": "delegation-private"})
+
+	if !result.IsError {
+		t.Fatalf("expected missing caller identity to be rejected, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "delegation-private") {
+		t.Fatalf("missing caller error leaked delegation ID: %s", result.ForLLM)
+	}
 }
 
 func TestDelegationStatusTool_ListScopesRecordsToCallingAgent(t *testing.T) {
@@ -69,6 +116,35 @@ func TestDelegationStatusTool_ListScopesRecordsToCallingAgent(t *testing.T) {
 	}
 }
 
+func TestDelegationStatusTool_GetByIDAllowsVisibleRecordRoles(t *testing.T) {
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:      "delegation-requester",
+			Status:            "completed",
+			ParentAgentID:     "ceo",
+			TargetAgentID:     "cto",
+			RequestedBy:       "chief-of-staff",
+			VisibleToAgentIDs: []string{"pm"},
+			Task:              "Launch readiness review.",
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+	for _, callerAgentID := range []string{"ceo", "cto", "chief-of-staff", "pm"} {
+		t.Run(callerAgentID, func(t *testing.T) {
+			ctx := WithToolSessionContext(context.Background(), callerAgentID, "session", nil)
+
+			result := tool.Execute(ctx, map[string]any{"delegation_id": "delegation-requester"})
+
+			if result.IsError {
+				t.Fatalf("Execute() returned error for visible caller %q: %s", callerAgentID, result.ForLLM)
+			}
+			if !strings.Contains(result.ForLLM, "delegation-requester") {
+				t.Fatalf("ForLLM missing visible delegation:\n%s", result.ForLLM)
+			}
+		})
+	}
+}
+
 func TestDelegationStatusTool_GetByIDRejectsUnrelatedRecord(t *testing.T) {
 	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
 		{
@@ -86,6 +162,53 @@ func TestDelegationStatusTool_GetByIDRejectsUnrelatedRecord(t *testing.T) {
 
 	if !result.IsError {
 		t.Fatalf("expected unrelated record lookup to be rejected, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "delegation-private") {
+		t.Fatalf("unrelated lookup leaked delegation ID: %s", result.ForLLM)
+	}
+}
+
+func TestDelegationStatusTool_ListFiltersRequestedByAndExplicitVisibleRecords(t *testing.T) {
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:  "delegation-requested",
+			Status:        "running",
+			ParentAgentID: "ceo",
+			TargetAgentID: "cto",
+			RequestedBy:   "chief-of-staff",
+			Task:          "Requested by visible caller.",
+		},
+		{
+			DelegationID:      "delegation-explicit",
+			Status:            "running",
+			ParentAgentID:     "cfo",
+			TargetAgentID:     "legal",
+			VisibleToAgentIDs: []string{"chief-of-staff"},
+			Task:              "Explicitly visible to caller.",
+		},
+		{
+			DelegationID:  "delegation-private",
+			Status:        "running",
+			ParentAgentID: "cro",
+			TargetAgentID: "sales",
+			Task:          "Private revenue work.",
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+	ctx := WithToolSessionContext(context.Background(), "chief-of-staff", "session", nil)
+
+	result := tool.Execute(ctx, map[string]any{})
+
+	if result.IsError {
+		t.Fatalf("Execute() returned error: %s", result.ForLLM)
+	}
+	for _, want := range []string{"delegation-requested", "delegation-explicit"} {
+		if !strings.Contains(result.ForLLM, want) {
+			t.Fatalf("ForLLM missing visible delegation %q:\n%s", want, result.ForLLM)
+		}
+	}
+	if strings.Contains(result.ForLLM, "delegation-private") {
+		t.Fatalf("ForLLM leaked unrelated private delegation:\n%s", result.ForLLM)
 	}
 }
 

@@ -25,16 +25,17 @@ var (
 // agent to another. It is intentionally source-level: public tools and durable
 // queues can wrap it without overloading the existing spawn/subagent behavior.
 type AgentDelegationRequest struct {
-	ParentAgentID    string
-	TargetAgentID    string
-	Task             string
-	ThreadKey        string
-	Mode             string
-	Priority         string
-	DueAt            *time.Time
-	RequestedBy      string
-	ApprovalRequired bool
-	ArtifactRefs     []string
+	ParentAgentID     string
+	TargetAgentID     string
+	Task              string
+	ThreadKey         string
+	Mode              string
+	Priority          string
+	DueAt             *time.Time
+	RequestedBy       string
+	VisibleToAgentIDs []string
+	ApprovalRequired  bool
+	ArtifactRefs      []string
 }
 
 // AgentDelegationResult is the synchronous outcome of a delegated target-agent
@@ -303,16 +304,17 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 func agentDelegationRequestFromTool(req tools.DelegateExecutionRequest, mode string) AgentDelegationRequest {
 	dueAt := parseDelegationDue(req.Due)
 	return AgentDelegationRequest{
-		ParentAgentID:    routing.NormalizeAgentID(req.ParentAgentID),
-		TargetAgentID:    routing.NormalizeAgentID(req.TargetAgentID),
-		Task:             req.Task,
-		ThreadKey:        req.ThreadKey,
-		Mode:             mode,
-		Priority:         req.Priority,
-		DueAt:            dueAt,
-		RequestedBy:      req.RequestedBy,
-		ApprovalRequired: req.ApprovalRequired,
-		ArtifactRefs:     req.ArtifactRefs,
+		ParentAgentID:     routing.NormalizeAgentID(req.ParentAgentID),
+		TargetAgentID:     routing.NormalizeAgentID(req.TargetAgentID),
+		Task:              req.Task,
+		ThreadKey:         req.ThreadKey,
+		Mode:              mode,
+		Priority:          req.Priority,
+		DueAt:             dueAt,
+		RequestedBy:       req.RequestedBy,
+		VisibleToAgentIDs: compactDelegationRefs(req.VisibleToAgentIDs),
+		ApprovalRequired:  req.ApprovalRequired,
+		ArtifactRefs:      req.ArtifactRefs,
 	}
 }
 
@@ -342,20 +344,21 @@ func toolDelegationResult(result AgentDelegationResult) tools.DelegateExecutionR
 
 func toolDelegationRecord(rec AgentDelegationRecord) tools.DelegationRecord {
 	out := tools.DelegationRecord{
-		DelegationID:  rec.DelegationID,
-		Status:        string(rec.Status),
-		ParentAgentID: rec.ParentAgentID,
-		TargetAgentID: rec.TargetAgentID,
-		Task:          rec.Request.Task,
-		ThreadKey:     rec.Request.ThreadKey,
-		Mode:          rec.Request.Mode,
-		Priority:      rec.Request.Priority,
-		RequestedBy:   rec.Request.RequestedBy,
-		ArtifactRefs:  rec.Request.ArtifactRefs,
-		CreatedAt:     rec.CreatedAt,
-		UpdatedAt:     rec.UpdatedAt,
-		StartedAt:     rec.StartedAt,
-		CompletedAt:   rec.CompletedAt,
+		DelegationID:      rec.DelegationID,
+		Status:            string(rec.Status),
+		ParentAgentID:     rec.ParentAgentID,
+		TargetAgentID:     rec.TargetAgentID,
+		Task:              rec.Request.Task,
+		ThreadKey:         rec.Request.ThreadKey,
+		Mode:              rec.Request.Mode,
+		Priority:          rec.Request.Priority,
+		RequestedBy:       rec.Request.RequestedBy,
+		VisibleToAgentIDs: rec.VisibleToAgentIDs,
+		ArtifactRefs:      rec.Request.ArtifactRefs,
+		CreatedAt:         rec.CreatedAt,
+		UpdatedAt:         rec.UpdatedAt,
+		StartedAt:         rec.StartedAt,
+		CompletedAt:       rec.CompletedAt,
 	}
 	if rec.Result != nil {
 		out.Result = rec.Result.Content

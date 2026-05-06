@@ -13,16 +13,17 @@ import (
 var ErrDelegationRecordNotFound = errors.New("delegation record not found")
 
 type DelegateExecutionRequest struct {
-	ParentAgentID    string
-	TargetAgentID    string
-	Task             string
-	ThreadKey        string
-	Mode             string
-	Priority         string
-	Due              string
-	RequestedBy      string
-	ApprovalRequired bool
-	ArtifactRefs     []string
+	ParentAgentID     string
+	TargetAgentID     string
+	Task              string
+	ThreadKey         string
+	Mode              string
+	Priority          string
+	Due               string
+	RequestedBy       string
+	VisibleToAgentIDs []string
+	ApprovalRequired  bool
+	ArtifactRefs      []string
 }
 
 type DelegateExecutionResult struct {
@@ -40,22 +41,23 @@ type DelegationRunner interface {
 }
 
 type DelegationRecord struct {
-	DelegationID  string
-	Status        string
-	ParentAgentID string
-	TargetAgentID string
-	Task          string
-	ThreadKey     string
-	Mode          string
-	Priority      string
-	RequestedBy   string
-	ArtifactRefs  []string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	StartedAt     *time.Time
-	CompletedAt   *time.Time
-	Result        string
-	Error         string
+	DelegationID      string
+	Status            string
+	ParentAgentID     string
+	TargetAgentID     string
+	Task              string
+	ThreadKey         string
+	Mode              string
+	Priority          string
+	RequestedBy       string
+	VisibleToAgentIDs []string
+	ArtifactRefs      []string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	StartedAt         *time.Time
+	CompletedAt       *time.Time
+	Result            string
+	Error             string
 }
 
 type DelegationRecordQuery struct {
@@ -111,17 +113,23 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 	callerAgentID := strings.TrimSpace(ToolAgentID(ctx))
 	delegationID := stringArg(args, "delegation_id")
 	targetAgentID := stringArg(args, "target_agent_id")
+	if callerAgentID == "" {
+		return ErrorResult("delegation_status error: calling agent identity is required")
+	}
 
 	if delegationID != "" {
-		rec, err := t.reader.GetDelegationRecord(ctx, delegationID)
+		records, err := t.reader.ListDelegationRecords(ctx, DelegationRecordQuery{
+			DelegationID:     delegationID,
+			VisibleToAgentID: callerAgentID,
+		})
 		if err != nil {
-			return ErrorResult(fmt.Sprintf("delegation_status error: delegation %q not found", delegationID)).WithError(err)
+			return ErrorResult("delegation_status error: delegation not found").WithError(err)
 		}
-		if callerAgentID != "" && rec.ParentAgentID != callerAgentID && rec.TargetAgentID != callerAgentID {
+		if len(records) == 0 {
 			err := fmt.Errorf("delegation %q is not visible to agent %q", delegationID, callerAgentID)
 			return ErrorResult("delegation_status error: delegation not found").WithError(err)
 		}
-		return NewToolResult(formatDelegationRecord(rec))
+		return NewToolResult(formatDelegationRecord(records[0]))
 	}
 
 	records, err := t.reader.ListDelegationRecords(ctx, DelegationRecordQuery{
@@ -180,6 +188,19 @@ func (t *DelegationInboxTool) Execute(ctx context.Context, args map[string]any) 
 		return NewToolResult("Delegation inbox is empty.")
 	}
 	return NewToolResult(formatDelegationRecords("Delegation inbox", records))
+}
+
+func delegationRecordVisibleToAgent(rec DelegationRecord, agentID string) bool {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false
+	}
+	if rec.ParentAgentID == agentID || rec.TargetAgentID == agentID || rec.RequestedBy == agentID {
+		return true
+	}
+	return slices.ContainsFunc(rec.VisibleToAgentIDs, func(visibleAgentID string) bool {
+		return strings.TrimSpace(visibleAgentID) == agentID
+	})
 }
 
 func formatDelegationRecords(title string, records []DelegationRecord) string {

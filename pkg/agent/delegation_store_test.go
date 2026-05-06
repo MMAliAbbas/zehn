@@ -220,6 +220,80 @@ func TestDelegationRecordStore_ListScopesByVisibleAgentAndTarget(t *testing.T) {
 	}
 }
 
+func TestDelegationRecordStore_ListFailsClosedWithoutVisibleAgent(t *testing.T) {
+	store := NewDelegationRecordStore(t.TempDir(), nil)
+	if _, err := store.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "ceo",
+		TargetAgentID: "cto",
+		Task:          "engineering plan",
+	}); err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+
+	records, err := store.List(context.Background(), AgentDelegationRecordQuery{})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("List() returned %d records without visible agent, want 0: %#v", len(records), records)
+	}
+
+	all, err := store.List(context.Background(), AgentDelegationRecordQuery{IncludePrivateAll: true})
+	if err != nil {
+		t.Fatalf("List(IncludePrivateAll) error = %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("List(IncludePrivateAll) returned %d records, want 1: %#v", len(all), all)
+	}
+}
+
+func TestDelegationRecordStore_ListAllowsRequestedByAndExplicitVisibleAgent(t *testing.T) {
+	store := NewDelegationRecordStore(t.TempDir(), nil)
+	store.now = fixedDelegationClock(
+		time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 6, 10, 1, 0, 0, time.UTC),
+		time.Date(2026, 5, 6, 10, 2, 0, 0, time.UTC),
+	)
+	for _, req := range []AgentDelegationRequest{
+		{
+			ParentAgentID: "ceo",
+			TargetAgentID: "cto",
+			RequestedBy:   "chief-of-staff",
+			Task:          "requested by visible caller",
+		},
+		{
+			ParentAgentID:     "cfo",
+			TargetAgentID:     "legal",
+			VisibleToAgentIDs: []string{"chief-of-staff"},
+			Task:              "explicitly visible to caller",
+		},
+		{
+			ParentAgentID: "cro",
+			TargetAgentID: "sales",
+			Task:          "private revenue work",
+		},
+	} {
+		if _, err := store.Requested(context.Background(), req); err != nil {
+			t.Fatalf("Requested() error = %v", err)
+		}
+	}
+
+	records, err := store.List(context.Background(), AgentDelegationRecordQuery{
+		VisibleToAgentID: "chief-of-staff",
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("List() returned %d records, want 2: %#v", len(records), records)
+	}
+	for _, rec := range records {
+		if rec.ParentAgentID == "cro" || rec.TargetAgentID == "sales" {
+			t.Fatalf("List() leaked unrelated private record: %#v", rec)
+		}
+	}
+}
+
 func TestDelegationRecordStore_RejectsUnsafeRecordIDs(t *testing.T) {
 	store := NewDelegationRecordStore(t.TempDir(), nil)
 	if _, err := store.Get(context.Background(), "../escape"); err == nil {

@@ -68,6 +68,10 @@ Keep Yaad private. Preferred first path:
 
 Only consider a private Yaad-backed context manager after MCP/private integration proves reliable.
 
+For LogicIgniter-wide memory, use Yaad scope `{"scope_type":"organization","external_key":"logicigniter"}`.
+Do not use `scope_type: company`; it is not a valid Yaad scope type. When scope
+validity is uncertain, call `scope_type_list` first and use the returned values.
+
 ## Yaad For Delegation Memory
 
 Delegation memory should prefer Yaad when configured, but local records remain the source of operational truth for in-flight work. Terminal delegation states are the useful memory boundary: completed, failed, and cancelled records can be written; requested/running states should be skipped or marked skipped to avoid memory duplication.

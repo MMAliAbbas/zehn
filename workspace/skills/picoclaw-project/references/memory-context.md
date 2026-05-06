@@ -22,6 +22,10 @@ For Zehn, keep Yaad private unless explicitly designing an upstream-neutral exte
 
 A future private Zehn branch could add a Yaad-backed `ContextManager`, but that should happen only after the MCP/private-config path proves stable and the session lifecycle is fully understood.
 
+For LogicIgniter-wide memory, use Yaad scope `{"scope_type":"organization","external_key":"logicigniter"}`.
+Do not use `scope_type: company`; it is not a valid Yaad scope type. When scope
+validity is uncertain, call `scope_type_list` first and use the returned values.
+
 ## Delegation Memory
 
 Durable delegation memory is terminal-state focused. Requested/running states should be skipped or recorded as skipped; completed, failed, and cancelled delegations may write durable summaries. The current Yaad writer calls `memory_add` through MCP and records write status back into the local delegation record.

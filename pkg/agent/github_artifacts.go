@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	integrationtools "github.com/sipeed/picoclaw/pkg/tools/integration"
@@ -36,12 +37,15 @@ func (al *AgentLoop) SetGitHubArtifactWriter(writer AgentGitHubArtifactWriter) {
 }
 
 const defaultGitHubArtifactPublishTimeout = 30 * time.Second
-
-var defaultGitHubArtifactPublisher = newGitHubArtifactPublisher(4, defaultGitHubArtifactPublishTimeout)
+const defaultGitHubArtifactPublisherCapacity = 4
 
 type githubArtifactPublisher struct {
 	sem     chan struct{}
 	timeout time.Duration
+
+	mu     sync.Mutex
+	closed bool
+	wg     sync.WaitGroup
 }
 
 func newGitHubArtifactPublisher(maxConcurrent int, timeout time.Duration) *githubArtifactPublisher {
@@ -61,18 +65,35 @@ func (p *githubArtifactPublisher) Submit(run func(context.Context)) bool {
 	if p == nil {
 		return false
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
 	select {
 	case p.sem <- struct{}{}:
 	default:
 		return false
 	}
+	p.wg.Add(1)
 	go func() {
+		defer p.wg.Done()
 		defer func() { <-p.sem }()
 		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 		defer cancel()
 		run(ctx)
 	}()
 	return true
+}
+
+func (p *githubArtifactPublisher) Close() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
+	p.wg.Wait()
 }
 
 func (al *AgentLoop) maybePublishMeetingGitHubArtifact(
@@ -114,7 +135,7 @@ func (al *AgentLoop) maybePublishMeetingGitHubArtifact(
 		Body:       buildMeetingGitHubIssueBody(record),
 		Labels:     []string{"meeting", "tracker"},
 	}
-	if !defaultGitHubArtifactPublisher.Submit(func(publishCtx context.Context) {
+	if !al.githubArtifactPublisher.Submit(func(publishCtx context.Context) {
 		issue, err := writer.CreateIssue(publishCtx, issueReq)
 		if err != nil {
 			_ = al.meetingRecords.RecordGitHubArtifact(context.Background(), record.MeetingID, AgentGitHubArtifactWrite{
@@ -197,7 +218,7 @@ func (al *AgentLoop) maybePublishDelegationGitHubArtifact(
 		Body:       buildDelegationGitHubIssueBody(record),
 		Labels:     []string{"delegation", "tracker"},
 	}
-	if !defaultGitHubArtifactPublisher.Submit(func(publishCtx context.Context) {
+	if !al.githubArtifactPublisher.Submit(func(publishCtx context.Context) {
 		issue, err := writer.CreateIssue(publishCtx, issueReq)
 		if err != nil {
 			_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{

@@ -175,6 +175,7 @@ func TestRunAgentDelegationGitHubPublishDoesNotBlockCompletedResult(t *testing.T
 		{ID: "target"},
 	})
 	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	al.githubArtifactPublisher = newGitHubArtifactPublisher(1, time.Second)
 	writer := &blockingGitHubArtifactWriter{
 		started: make(chan struct{}),
 		release: make(chan struct{}),
@@ -242,6 +243,178 @@ func TestRunAgentDelegationGitHubPublishDoesNotBlockCompletedResult(t *testing.T
 	if rec.GitHubArtifact.IssueURL == "" {
 		t.Fatalf("GitHubArtifact = %#v, want issue URL", rec.GitHubArtifact)
 	}
+}
+
+func TestRunAgentDelegationGitHubPublisherRecordsCapacityFailure(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	al.githubArtifactPublisher = newGitHubArtifactPublisher(1, time.Second)
+	writer := &blockingGitHubArtifactWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	al.SetGitHubArtifactWriter(writer)
+
+	first, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Prepare the first approval package.",
+		ThreadKey:        "first",
+		ApprovalRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("first RunAgentDelegation() error = %v", err)
+	}
+	<-writer.started
+	waitForDelegationGitHubStatus(t, al, first.DelegationID, AgentGitHubArtifactStatusPending)
+
+	second, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Prepare the second approval package.",
+		ThreadKey:        "second",
+		ApprovalRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("second RunAgentDelegation() error = %v", err)
+	}
+	rec := waitForDelegationGitHubStatus(t, al, second.DelegationID, AgentGitHubArtifactStatusFailed)
+	if rec.GitHubArtifact == nil || !strings.Contains(rec.GitHubArtifact.Error, "capacity") {
+		t.Fatalf("GitHubArtifact = %#v, want capacity failure", rec.GitHubArtifact)
+	}
+
+	close(writer.release)
+	waitForDelegationGitHubStatus(t, al, first.DelegationID, AgentGitHubArtifactStatusCreated)
+}
+
+func TestRunAgentDelegationGitHubPublisherTimeoutRecordsFailure(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	al.githubArtifactPublisher = newGitHubArtifactPublisher(1, 10*time.Millisecond)
+	writer := &blockingGitHubArtifactWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	al.SetGitHubArtifactWriter(writer)
+
+	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Prepare an approval package that times out in GitHub.",
+		ThreadKey:        "timeout",
+		ApprovalRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+	<-writer.started
+	rec := waitForDelegationGitHubStatus(t, al, result.DelegationID, AgentGitHubArtifactStatusFailed)
+	if rec.GitHubArtifact == nil || !strings.Contains(rec.GitHubArtifact.Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("GitHubArtifact = %#v, want deadline exceeded failure", rec.GitHubArtifact)
+	}
+}
+
+func TestAgentLoopCloseDrainsAcceptedGitHubPublisherJobs(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	al.githubArtifactPublisher = newGitHubArtifactPublisher(1, time.Second)
+	writer := &blockingGitHubArtifactWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	al.SetGitHubArtifactWriter(writer)
+
+	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Prepare an approval package before shutdown.",
+		ThreadKey:        "shutdown",
+		ApprovalRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+	<-writer.started
+
+	closed := make(chan struct{})
+	go func() {
+		al.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("AgentLoop.Close() returned before accepted GitHub job finished")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(writer.release)
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("AgentLoop.Close() did not drain accepted GitHub job")
+	}
+	waitForDelegationGitHubStatus(t, al, result.DelegationID, AgentGitHubArtifactStatusCreated)
+}
+
+func TestGitHubPublisherCapacityIsIsolatedBetweenAgentLoops(t *testing.T) {
+	cfg1 := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al1 := NewAgentLoop(cfg1, bus.NewMessageBus(), &recordingDelegationProvider{})
+	al1.githubArtifactPublisher = newGitHubArtifactPublisher(1, time.Second)
+	writer1 := &blockingGitHubArtifactWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	al1.SetGitHubArtifactWriter(writer1)
+
+	cfg2 := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al2 := NewAgentLoop(cfg2, bus.NewMessageBus(), &recordingDelegationProvider{})
+	al2.githubArtifactPublisher = newGitHubArtifactPublisher(1, time.Second)
+	writer2 := &fakeGitHubArtifactWriter{}
+	al2.SetGitHubArtifactWriter(writer2)
+
+	first, err := al1.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Prepare the blocked approval package.",
+		ThreadKey:        "blocked",
+		ApprovalRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("first RunAgentDelegation() error = %v", err)
+	}
+	<-writer1.started
+	waitForDelegationGitHubStatus(t, al1, first.DelegationID, AgentGitHubArtifactStatusPending)
+
+	second, err := al2.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Prepare the isolated approval package.",
+		ThreadKey:        "isolated",
+		ApprovalRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("second RunAgentDelegation() error = %v", err)
+	}
+	waitForDelegationGitHubStatus(t, al2, second.DelegationID, AgentGitHubArtifactStatusCreated)
+
+	close(writer1.release)
+	waitForDelegationGitHubStatus(t, al1, first.DelegationID, AgentGitHubArtifactStatusCreated)
 }
 
 func TestRunAgentMeetingGitHubSkipsIssueWithoutExecutableWork(t *testing.T) {

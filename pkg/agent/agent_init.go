@@ -74,6 +74,10 @@ func NewAgentLoop(
 			defaultMeetingRecordStoreDir(cfg),
 			delegationRecordRedactor(cfg),
 		),
+		githubArtifactPublisher: newGitHubArtifactPublisher(
+			defaultGitHubArtifactPublisherCapacity,
+			defaultGitHubArtifactPublishTimeout,
+		),
 		eventBus:    eventBus,
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),

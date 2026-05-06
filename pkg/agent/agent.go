@@ -32,14 +32,15 @@ import (
 
 type AgentLoop struct {
 	// Core dependencies
-	bus               interfaces.MessageBus
-	cfg               *config.Config
-	registry          *AgentRegistry
-	state             *state.Manager
-	delegationRecords *DelegationRecordStore
-	asyncDelegations  *asyncDelegationExecutor
-	meetingRecords    *MeetingRecordStore
-	githubArtifacts   AgentGitHubArtifactWriter
+	bus                     interfaces.MessageBus
+	cfg                     *config.Config
+	registry                *AgentRegistry
+	state                   *state.Manager
+	delegationRecords       *DelegationRecordStore
+	asyncDelegations        *asyncDelegationExecutor
+	meetingRecords          *MeetingRecordStore
+	githubArtifacts         AgentGitHubArtifactWriter
+	githubArtifactPublisher *githubArtifactPublisher
 
 	// Event system (from Incoming)
 	eventBus *EventBus
@@ -276,6 +277,9 @@ func (al *AgentLoop) Stop() {
 func (al *AgentLoop) Close() {
 	if al.asyncDelegations != nil {
 		al.asyncDelegations.Close()
+	}
+	if al.githubArtifactPublisher != nil {
+		al.githubArtifactPublisher.Close()
 	}
 
 	mcpManager := al.mcp.takeManager()

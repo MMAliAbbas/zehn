@@ -49,6 +49,12 @@ PICOCLAW_LOG_LEVEL=debug picoclaw gateway
 - MCP server appears configured but no tools: gateway restart may be needed, server may be deferred, or `tools.mcp.enabled` is false.
 - Cron job exists but does not execute: cron tool disabled, gateway not running, command job blocked by exec settings, or job is disabled.
 - Secret still missing: `.security.yml` key must match model name/channel key exactly and use the right plural/singular field.
+- Delegation tool missing: confirm `tools.delegate_to_agent.enabled`, gateway restart, and that the specific agent has the tool registered.
+- Delegation denied: check the parent agent's `subagents.allow_agents`, target agent ID normalization, and target registration.
+- Async delegation never finishes: check delegation records, executor capacity, provider errors, and whether gateway was shut down before accepted work drained.
+- Delegation status says identity is required: the tool is being called without agent-scoped tool context; use it from an agent turn or fix tool context injection.
+- Meeting fails during participant turns: meeting v1 treats participants as required by default; inspect the failed participant delegation record before retrying.
+- GitHub artifact missing or skipped: tracker writer may be disabled, the meeting may have no executable work/follow-up, or the artifact publisher may have recorded a capacity/timeout failure in the local record.
 
 ## Backup Targets
 
@@ -62,4 +68,3 @@ Back up at least:
 - `workspace/cron`
 - `workspace/skills`
 - custom MCP env files
-

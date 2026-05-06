@@ -68,3 +68,15 @@ Keep Yaad private. Preferred first path:
 
 Only consider a private Yaad-backed context manager after MCP/private integration proves reliable.
 
+## Yaad For Delegation Memory
+
+Delegation memory should prefer Yaad when configured, but local records remain the source of operational truth for in-flight work. Terminal delegation states are the useful memory boundary: completed, failed, and cancelled records can be written; requested/running states should be skipped or marked skipped to avoid memory duplication.
+
+For Zehn, configure private metadata locally so Yaad memories are easy to find, for example a private project key/source/label set. Do not put private Yaad details into upstream-facing PicoClaw config or docs.
+
+When testing:
+
+1. Run one local CLI delegation with Yaad disabled and confirm local records still work.
+2. Enable Yaad MCP and confirm a completed delegation records memory write status.
+3. Confirm non-strict Yaad failure records the failure but does not fail the user-visible delegation.
+4. Only then enable external channel access to delegation tools.

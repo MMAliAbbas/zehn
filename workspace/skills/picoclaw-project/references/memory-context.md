@@ -22,3 +22,10 @@ For Zehn, keep Yaad private unless explicitly designing an upstream-neutral exte
 
 A future private Zehn branch could add a Yaad-backed `ContextManager`, but that should happen only after the MCP/private-config path proves stable and the session lifecycle is fully understood.
 
+## Delegation Memory
+
+Durable delegation memory is terminal-state focused. Requested/running states should be skipped or recorded as skipped; completed, failed, and cancelled delegations may write durable summaries. The current Yaad writer calls `memory_add` through MCP and records write status back into the local delegation record.
+
+Keep memory metadata generic in core code. Generic defaults should use PicoClaw-facing labels/source values, while private deployments may configure project keys, labels, and source names locally. Do not hard-code private runtime branding into upstreamable package code.
+
+Always build durable memory payloads from redacted local records. If Yaad or any memory writer is unavailable, non-strict mode records the failure/unavailable state and lets the delegation complete; strict mode may surface memory persistence errors.

@@ -14,6 +14,23 @@ Use `gofmt` for Go code. Frontend code uses TypeScript, React, ESLint, Prettier,
 - `go test -run TestName -v ./pkg/...`: targeted iteration only.
 - `cd web/frontend && pnpm build && pnpm lint`: frontend verification.
 
+## Delegation And Meeting Verification
+
+For delegation/meeting changes, run focused normal and race tests before claiming the feature is safe:
+
+```bash
+go test ./pkg/agent ./pkg/tools ./pkg/config -run 'Delegation|Delegate|Meeting|GitHub|Artifact|Memory|Status|Inbox|Publisher|Participant|Failure|Cancel' -count=1
+go test ./pkg/agent ./pkg/tools ./pkg/config -run 'Delegation|Delegate|Meeting|GitHub|Artifact|Memory|Status|Inbox|Publisher|Participant|Failure|Cancel' -race
+```
+
+For broader confidence without launcher/backend listener dependencies:
+
+```bash
+go test ./pkg/agent ./pkg/tools ./pkg/config ./pkg/channels/discord -count=1
+```
+
+Review tests should cover: permission denial, missing target, sync/async success, async capacity/cancellation/shutdown, status/inbox visibility, local record redaction, GitHub artifact redaction, publisher timeout/failure, Yaad unavailable/strict/idempotent behavior, meeting participant failure, chair failure, cancellation, and the end-to-end sponsor-chair-participant recommendation path.
+
 ## Current Sandbox Findings
 
 In this environment, `make generate` completed successfully.
@@ -25,4 +42,3 @@ In this environment, `make generate` completed successfully.
 - Direct `go list ./...` without Makefile cache settings failed because the default Go build cache path was outside the writable sandbox.
 
 Do not claim the suite passes until these are rerun in an environment with module cache access and local listener permission.
-

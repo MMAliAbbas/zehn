@@ -91,3 +91,15 @@ Chat commands:
 
 Treat remote skill installation as trusted-code installation.
 
+## Agent Delegation And Meetings
+
+For an always-on assistant with multiple configured agents, use runtime tools rather than external chat relays:
+
+- `delegate_to_agent`: sends one task from a parent agent to a target configured agent. Use sync mode for immediate work and async mode for longer work that can be checked later.
+- `delegation_status`: shows only records visible to the calling agent. If caller identity is missing, the tool should error rather than list everything.
+- `delegation_inbox`: shows assigned work for the calling target agent.
+- `start_agent_meeting`: meeting v1. A sponsor asks a chair agent to consult required participants sequentially and return one consolidated recommendation.
+
+Enable these tools only after agent IDs, workspaces, models, and `subagents.allow_agents` are correct. Start with a narrow CEO-to-one-head delegation, then one chaired meeting with two participants, before allowing broad organization-wide use.
+
+GitHub artifacts are tracker outputs, not memory. They should be enabled only after redaction is verified and should be used for executable work, approvals, and follow-ups. Discord summaries should remain concise visibility updates and should not include raw internal prompts or meeting transcripts.

@@ -23,3 +23,16 @@ Read `CONTRIBUTING.md`, `AGENTS.md`, nearby tests, and the relevant source path.
 - Changes that disrupt long-running sessions, WebSockets, streaming, steering, or gateway lifecycle without broad evidence.
 - “Safety” patches that only address one narrow symptom while changing core semantics.
 
+## Delegation/Meeting Publishability
+
+The Zehn fork's delegation and meeting work can become upstreamable only after private automation is split away from generic PicoClaw code. Before publishing, run the local publishability audit and treat warnings for `workspace/skills/**`, `.picoclaw/**`, `supervision/zehn_feature_tasks/**`, and `supervision/ZEHN_FEATURE_*` as blockers for upstream-facing branches.
+
+Upstreamable slices should be small and generic:
+
+- Target-agent delegation primitive with allowlist checks and tests.
+- Local redacted record stores and status/inbox visibility.
+- Bounded async delegation executor.
+- Meeting v1 with explicit chaired sequential semantics.
+- Redacted, lifecycle-owned artifact publishing as a generic tracker adapter.
+
+Keep Yaad-specific wording, private operating model, Discord channel map, and local automation ledgers out of upstream commits. Rebuild clean branches from upstream `main` rather than pushing mixed local history.

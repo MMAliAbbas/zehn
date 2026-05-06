@@ -26,3 +26,15 @@ MCP tools can be registered eagerly or hidden behind discovery using regex and B
 
 Skills are installed and discovered through `pkg/skills` and tool surfaces. Skill install/import is a security-sensitive path because it can write executable instructions into the workspace. Review origin metadata, archive extraction, overwrite behavior, and registry trust before enabling remote skill installation.
 
+## Delegation And Meeting Tools
+
+The delegation/meeting tools are disabled unless enabled in config:
+
+- `delegate_to_agent`: ask a configured target agent to perform one task. Supports sync and async modes through the runtime delegation runner.
+- `delegation_status`: list or inspect delegation records visible to the calling agent. It must have caller identity; missing identity is an error.
+- `delegation_inbox`: list delegation work assigned to the calling target agent.
+- `start_agent_meeting`: start meeting v1, a private chaired sequential meeting with required participants and one chair recommendation.
+
+Do not overload these tools onto Discord channel routing. Discord can provide human-visible summaries, but internal delegation should use the runtime agent registry, internal sessions, local records, durable memory, and configured artifact writers.
+
+When reviewing tool registration, confirm `pkg/agent/agent_init.go` registers these tools only when explicitly enabled and that `delegate_to_agent` enforces both target existence and `subagents.allow_agents`.

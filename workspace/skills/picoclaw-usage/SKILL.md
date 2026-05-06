@@ -33,7 +33,12 @@ Do not treat PicoClaw as only a development repo. It is also a runtime to operat
 8. Add workspace identity/preferences/memory files.
 9. Add cron/heartbeat automation only after normal chat and tools work.
 
+## Delegation And Meeting Operations
+
+For multi-agent org setups, enable delegation and meetings in stages. `delegate_to_agent` should be used for durable target-agent work between configured agents; `start_agent_meeting` should be used for chaired sequential meeting v1 where a chair consults required participants and returns one consolidated recommendation. Keep Discord as the human visibility layer, not the internal delegation bus.
+
+Before broad channel use, verify local CLI/Web behavior, then enable Yaad memory, then tracker artifacts, then Discord summaries. Keep GitHub artifact publishing disabled until redaction tests pass for the deployed build, and keep `delegation_status`/`delegation_inbox` scoped to caller agent identity.
+
 ## Safety Defaults
 
 Before exposing PicoClaw to external messaging platforms, review `allow_from`, group triggers, `tools.exec.enabled`, `tools.exec.allow_remote`, `tools.cron.allow_command`, MCP servers, file access, and skill installation. Keep Yaad private: use private MCP/config integration first, not upstream-visible config.
-

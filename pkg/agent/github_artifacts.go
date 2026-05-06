@@ -111,7 +111,7 @@ func (al *AgentLoop) maybePublishMeetingGitHubArtifact(
 		SourceType: "meeting",
 		SourceID:   record.MeetingID,
 		Title:      "Meeting: " + record.Title,
-		Body:       buildMeetingGitHubIssueBody(record, outcome),
+		Body:       buildMeetingGitHubIssueBody(record),
 		Labels:     []string{"meeting", "tracker"},
 	}
 	if !defaultGitHubArtifactPublisher.Submit(func(publishCtx context.Context) {
@@ -184,13 +184,17 @@ func (al *AgentLoop) maybePublishDelegationGitHubArtifact(
 	_ = al.delegationRecords.RecordGitHubArtifact(context.Background(), record.DelegationID, AgentGitHubArtifactWrite{
 		Status: AgentGitHubArtifactStatusPending,
 	}, nil)
+	redactedRecord, err := al.delegationRecords.Get(context.Background(), record.DelegationID)
+	if err == nil {
+		record = redactedRecord
+	}
 
 	writer := al.githubArtifacts
 	issueReq := integrationtools.GitHubIssueRequest{
 		SourceType: "delegation",
 		SourceID:   record.DelegationID,
-		Title:      "Delegation: " + delegationIssueTitle(req),
-		Body:       buildDelegationGitHubIssueBody(record, req, result),
+		Title:      "Delegation: " + delegationIssueTitle(record),
+		Body:       buildDelegationGitHubIssueBody(record),
 		Labels:     []string{"delegation", "tracker"},
 	}
 	if !defaultGitHubArtifactPublisher.Submit(func(publishCtx context.Context) {
@@ -226,7 +230,7 @@ func delegationNeedsGitHubIssue(req AgentDelegationRequest) bool {
 	return req.ApprovalRequired || strings.EqualFold(strings.TrimSpace(req.Mode), "async")
 }
 
-func buildMeetingGitHubIssueBody(record AgentMeetingRecord, outcome AgentMeetingOutcome) string {
+func buildMeetingGitHubIssueBody(record AgentMeetingRecord) string {
 	var sb strings.Builder
 	sb.WriteString("GitHub is a tracker for executable work and approval follow-up. Durable meeting memory remains in the meeting record and configured memory systems.\n\n")
 	sb.WriteString("## Meeting\n")
@@ -239,40 +243,36 @@ func buildMeetingGitHubIssueBody(record AgentMeetingRecord, outcome AgentMeeting
 	sb.WriteString("\n\n## Goal\n")
 	sb.WriteString(record.Goal)
 	sb.WriteString("\n\n## Consolidated Recommendation\n")
-	sb.WriteString(strings.TrimSpace(outcome.Recommendation))
-	appendGitHubSection(&sb, "Timeline", outcome.Timeline)
-	appendGitHubSection(&sb, "Risks", outcome.Risks)
+	sb.WriteString(strings.TrimSpace(record.Recommendation))
+	appendGitHubSection(&sb, "Timeline", record.Timeline)
+	appendGitHubSection(&sb, "Risks", record.Risks)
 	appendGitHubSection(&sb, "Approvals", record.Approvals)
-	appendGitHubSection(&sb, "Follow-ups", outcome.FollowUps)
+	appendGitHubSection(&sb, "Follow-ups", record.FollowUps)
 	return strings.TrimSpace(sb.String())
 }
 
-func buildDelegationGitHubIssueBody(
-	record AgentDelegationRecord,
-	req AgentDelegationRequest,
-	result AgentDelegationResult,
-) string {
+func buildDelegationGitHubIssueBody(record AgentDelegationRecord) string {
 	var sb strings.Builder
 	sb.WriteString("GitHub is a tracker for delegated executable work or approval follow-up. Durable delegation memory remains in the delegation record and configured memory systems.\n\n")
 	sb.WriteString("## Delegation\n")
 	sb.WriteString("- Delegation ID: ")
 	sb.WriteString(record.DelegationID)
 	sb.WriteString("\n- Parent: ")
-	sb.WriteString(req.ParentAgentID)
+	sb.WriteString(record.ParentAgentID)
 	sb.WriteString("\n- Target: ")
-	sb.WriteString(req.TargetAgentID)
-	if req.ApprovalRequired {
+	sb.WriteString(record.TargetAgentID)
+	if record.Request.ApprovalRequired {
 		sb.WriteString("\n- Approval required: yes")
 	}
-	if req.Priority != "" {
+	if record.Request.Priority != "" {
 		sb.WriteString("\n- Priority: ")
-		sb.WriteString(req.Priority)
+		sb.WriteString(record.Request.Priority)
 	}
 	sb.WriteString("\n\n## Task\n")
-	sb.WriteString(req.Task)
-	if result.Content != "" {
+	sb.WriteString(record.Request.Task)
+	if record.Result != nil && record.Result.Content != "" {
 		sb.WriteString("\n\n## Current Result\n")
-		sb.WriteString(strings.TrimSpace(result.Content))
+		sb.WriteString(strings.TrimSpace(record.Result.Content))
 	}
 	return strings.TrimSpace(sb.String())
 }
@@ -339,16 +339,16 @@ func isMaterialGitHubCommentLine(line string) bool {
 	}
 }
 
-func delegationIssueTitle(req AgentDelegationRequest) string {
-	if req.ThreadKey != "" {
-		return req.ThreadKey
+func delegationIssueTitle(record AgentDelegationRecord) string {
+	if record.Request.ThreadKey != "" {
+		return record.Request.ThreadKey
 	}
-	task := strings.TrimSpace(req.Task)
+	task := strings.TrimSpace(record.Request.Task)
 	if len(task) > 72 {
 		return task[:72]
 	}
 	if task == "" {
-		return fmt.Sprintf("%s to %s", req.ParentAgentID, req.TargetAgentID)
+		return fmt.Sprintf("%s to %s", record.ParentAgentID, record.TargetAgentID)
 	}
 	return task
 }

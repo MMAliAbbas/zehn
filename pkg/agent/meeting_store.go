@@ -156,9 +156,11 @@ func (s *MeetingRecordStore) RecordGitHubArtifact(
 	artifactRefs []string,
 ) error {
 	return s.update(ctx, meetingID, func(rec *AgentMeetingRecord, now time.Time) {
+		write.IssueURL = s.redact(write.IssueURL)
+		write.Error = s.redact(write.Error)
 		write.UpdatedAt = now
 		rec.GitHubArtifact = &write
-		rec.ArtifactRefs = appendUniqueRefs(rec.ArtifactRefs, artifactRefs...)
+		rec.ArtifactRefs = appendUniqueRefs(rec.ArtifactRefs, s.redactRefs(artifactRefs)...)
 	})
 }
 

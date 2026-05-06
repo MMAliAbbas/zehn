@@ -243,11 +243,13 @@ func (s *DelegationRecordStore) RecordGitHubArtifact(
 	artifactRefs []string,
 ) error {
 	return s.update(ctx, delegationID, func(rec *AgentDelegationRecord, now time.Time) {
+		write.IssueURL = s.redact(write.IssueURL)
+		write.Error = s.redact(write.Error)
 		write.UpdatedAt = now
 		rec.GitHubArtifact = &write
-		rec.Request.ArtifactRefs = appendUniqueRefs(rec.Request.ArtifactRefs, artifactRefs...)
+		rec.Request.ArtifactRefs = appendUniqueRefs(rec.Request.ArtifactRefs, s.redactRefs(artifactRefs)...)
 		if rec.Result != nil {
-			rec.Result.ArtifactRefs = appendUniqueRefs(rec.Result.ArtifactRefs, artifactRefs...)
+			rec.Result.ArtifactRefs = appendUniqueRefs(rec.Result.ArtifactRefs, s.redactRefs(artifactRefs)...)
 		}
 	})
 }

@@ -63,6 +63,50 @@ func (p *advisoryGitHubMeetingProvider) GetDefaultModel() string {
 	return "provider-default"
 }
 
+type secretGitHubDelegationProvider struct {
+	secret string
+}
+
+func (p *secretGitHubDelegationProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	return &providers.LLMResponse{Content: "completed result with " + p.secret, FinishReason: "stop"}, nil
+}
+
+func (p *secretGitHubDelegationProvider) GetDefaultModel() string {
+	return "provider-default"
+}
+
+type secretGitHubMeetingProvider struct {
+	secret string
+}
+
+func (p *secretGitHubMeetingProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	content := strings.Join(messageContents(messages), "\n")
+	switch {
+	case strings.Contains(content, "Target agent: cmo"):
+		return &providers.LLMResponse{Content: "Position: campaign can use " + p.secret + "\nRisk: leak " + p.secret, FinishReason: "stop"}, nil
+	case strings.Contains(content, "Consolidate this chaired meeting"):
+		return &providers.LLMResponse{Content: "Recommendation: approve plan with " + p.secret + "\nTimeline: launch window uses " + p.secret + "\nRisks: margin exposure " + p.secret + "\nFollow-ups: CMO replaces " + p.secret, FinishReason: "stop"}, nil
+	default:
+		return &providers.LLMResponse{Content: "advisory response", FinishReason: "stop"}, nil
+	}
+}
+
+func (p *secretGitHubMeetingProvider) GetDefaultModel() string {
+	return "provider-default"
+}
+
 type fakeGitHubArtifactWriter struct {
 	mu         sync.Mutex
 	fail       bool
@@ -293,6 +337,50 @@ func TestRunAgentMeetingGitHubCreatesIssueAndCuratedParticipantComments(t *testi
 	}
 }
 
+func TestRunAgentMeetingGitHubArtifactsUseRedactedMeetingRecord(t *testing.T) {
+	secret := "ghp_fake_meeting_secret_12345"
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo"}}},
+		{ID: "cmo"},
+	})
+	cfg.ModelList = append(cfg.ModelList, &config.ModelConfig{
+		ModelName: "test-model",
+		APIKeys:   config.SecureStrings{config.NewSecureString(secret)},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &secretGitHubMeetingProvider{secret: secret})
+	writer := &fakeGitHubArtifactWriter{}
+	al.SetGitHubArtifactWriter(writer)
+
+	result, err := al.StartAgentMeeting(context.Background(), tools.MeetingExecutionRequest{
+		Title:               "Tracked sales sprint " + secret,
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo"},
+		Goal:                "Create executable work around " + secret,
+		Approvals:           []string{"approval required for " + secret},
+	})
+	if err != nil {
+		t.Fatalf("StartAgentMeeting() error = %v", err)
+	}
+	waitForMeetingGitHubStatus(t, al, result.MeetingID, AgentGitHubArtifactStatusCreated)
+
+	issues, comments := writer.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(issues))
+	}
+	if len(comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(comments))
+	}
+	artifactText := issues[0].Title + "\n" + issues[0].Body + "\n" + comments[0].Body
+	assertGitHubArtifactRedacted(t, artifactText, secret)
+	for _, want := range []string{"approve plan", "Timeline", "Risks", "Follow-ups", "Focused participant note"} {
+		if !strings.Contains(artifactText, want) {
+			t.Fatalf("artifact text missing %q:\n%s", want, artifactText)
+		}
+	}
+}
+
 func TestRunAgentMeetingGitHubFailurePreservesMeetingRecord(t *testing.T) {
 	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
 		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
@@ -385,6 +473,50 @@ func TestRunAgentDelegationGitHubCreatesIssueForApprovalTrackedWork(t *testing.T
 	}
 }
 
+func TestRunAgentDelegationGitHubArtifactUsesRedactedDelegationRecord(t *testing.T) {
+	secret := "ghp_fake_delegation_secret_12345"
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	cfg.ModelList = append(cfg.ModelList, &config.ModelConfig{
+		ModelName: "test-model",
+		APIKeys:   config.SecureStrings{config.NewSecureString(secret)},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &secretGitHubDelegationProvider{secret: secret})
+	writer := &fakeGitHubArtifactWriter{}
+	al.SetGitHubArtifactWriter(writer)
+
+	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "prepare approval package with " + secret,
+		ThreadKey:        "approval-thread-" + secret,
+		Priority:         "high-" + secret,
+		ApprovalRequired: true,
+		ArtifactRefs:     []string{"input-ref-" + secret},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+	waitForDelegationGitHubStatus(t, al, result.DelegationID, AgentGitHubArtifactStatusCreated)
+
+	issues, comments := writer.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(issues))
+	}
+	if len(comments) != 0 {
+		t.Fatalf("comments = %d, want no delegation comments", len(comments))
+	}
+	artifactText := issues[0].Title + "\n" + issues[0].Body
+	assertGitHubArtifactRedacted(t, artifactText, secret)
+	for _, want := range []string{"Approval required", "Priority", "Current Result", "[FILTERED]"} {
+		if !strings.Contains(artifactText, want) {
+			t.Fatalf("artifact text missing %q:\n%s", want, artifactText)
+		}
+	}
+}
+
 func TestRunAgentDelegationGitHubSkipsAdvisoryExchange(t *testing.T) {
 	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
 		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
@@ -406,6 +538,16 @@ func TestRunAgentDelegationGitHubSkipsAdvisoryExchange(t *testing.T) {
 	issues, comments := writer.snapshot()
 	if len(issues) != 0 || len(comments) != 0 {
 		t.Fatalf("GitHub artifacts = %d issues/%d comments, want none", len(issues), len(comments))
+	}
+}
+
+func assertGitHubArtifactRedacted(t *testing.T, artifactText, secret string) {
+	t.Helper()
+	if strings.Contains(artifactText, secret) {
+		t.Fatalf("GitHub artifact leaked secret %q:\n%s", secret, artifactText)
+	}
+	if !strings.Contains(artifactText, "[FILTERED]") {
+		t.Fatalf("GitHub artifact missing redaction placeholder:\n%s", artifactText)
 	}
 }
 

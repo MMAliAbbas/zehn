@@ -40,6 +40,70 @@ GitHub issues are created only for executable or approval-tracked delegation
 work, such as async execution or `approval_required` work. Advisory exchanges do
 not create issues.
 
+## Agent Organization Metadata
+
+Configured agents may optionally include `agents.organization` metadata for
+displaying a reporting hierarchy. This section is separate from delegation
+permissions:
+
+- `subagents.allow_agents` defines which target agents an agent may call.
+- `agents.organization` defines where agents sit in a reporting or operating
+  structure.
+
+Do not infer official reporting lines from `subagents.allow_agents`. An agent
+may be allowed to consult peers, specialists, or shared services that do not
+report to it. Likewise, a reporting child may require a different runtime path
+or approval flow before it can receive delegated work.
+
+The organization section is optional. Configurations without it continue to load
+using the normal `agents.list` behavior. When present, it supports ordered roots
+and node metadata:
+
+```json
+{
+  "agents": {
+    "list": [
+      { "id": "main", "name": "Main Coordinator" },
+      { "id": "operations", "name": "Operations" }
+    ],
+    "organization": {
+      "roots": ["main"],
+      "nodes": [
+        {
+          "agent_id": "main",
+          "label": "Main Coordinator",
+          "group": "executive",
+          "sort": 10
+        },
+        {
+          "agent_id": "operations",
+          "parent_agent_id": "main",
+          "label": "Operations",
+          "group": "department",
+          "sort": 20
+        }
+      ]
+    }
+  }
+}
+```
+
+Fields:
+
+- `roots`: optional ordered root agent IDs. If omitted, roots are derived from
+  nodes without `parent_agent_id`.
+- `nodes[].agent_id`: configured agent ID for this organization node.
+- `nodes[].parent_agent_id`: optional reporting parent agent ID.
+- `nodes[].label`: optional display label override.
+- `nodes[].group`: optional display grouping for UIs.
+- `nodes[].sort`: optional stable numeric ordering within siblings and derived
+  roots. Ties are ordered by `agent_id`.
+
+Validation rejects duplicate nodes, unknown root agents, unknown node agents,
+unknown parents, and reporting cycles. Organization metadata does not enable
+delegation by itself and does not change spawn, subagent, routing, session, or
+channel behavior.
+
 ## Meeting V1 Workflow
 
 `start_agent_meeting` starts meeting v1: a private chaired sequential meeting.

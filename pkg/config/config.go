@@ -1,12 +1,14 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -140,9 +142,10 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 }
 
 type AgentsConfig struct {
-	Defaults AgentDefaults   `json:"defaults"`
-	List     []AgentConfig   `json:"list,omitempty"`
-	Dispatch *DispatchConfig `json:"dispatch,omitempty"`
+	Defaults     AgentDefaults            `json:"defaults"`
+	List         []AgentConfig            `json:"list,omitempty"`
+	Dispatch     *DispatchConfig          `json:"dispatch,omitempty"`
+	Organization *AgentOrganizationConfig `json:"organization,omitempty"`
 }
 
 // AgentModelConfig supports both string and structured model config.
@@ -197,6 +200,157 @@ type AgentConfig struct {
 type SubagentsConfig struct {
 	AllowAgents []string          `json:"allow_agents,omitempty"`
 	Model       *AgentModelConfig `json:"model,omitempty"`
+}
+
+type AgentOrganizationConfig struct {
+	Roots []string                      `json:"roots,omitempty"`
+	Nodes []AgentOrganizationNodeConfig `json:"nodes,omitempty"`
+}
+
+type AgentOrganizationNodeConfig struct {
+	AgentID       string `json:"agent_id"`
+	ParentAgentID string `json:"parent_agent_id,omitempty"`
+	Label         string `json:"label,omitempty"`
+	Group         string `json:"group,omitempty"`
+	Sort          int    `json:"sort,omitempty"`
+}
+
+func (c *Config) ValidateAgentOrganization() error {
+	return c.Agents.ValidateOrganization()
+}
+
+func (a *AgentsConfig) ValidateOrganization() error {
+	if a.Organization == nil {
+		return nil
+	}
+
+	knownAgents := make(map[string]struct{}, len(a.List))
+	for _, agent := range a.List {
+		knownAgents[agent.ID] = struct{}{}
+	}
+
+	seenRoots := make(map[string]int, len(a.Organization.Roots))
+	for i, root := range a.Organization.Roots {
+		if _, ok := knownAgents[root]; !ok {
+			return fmt.Errorf("agents.organization.roots[%d] %q is not a configured agent", i, root)
+		}
+		if first, ok := seenRoots[root]; ok {
+			return fmt.Errorf("agents.organization.roots[%d] %q duplicates roots[%d]", i, root, first)
+		}
+		seenRoots[root] = i
+	}
+
+	seenNodes := make(map[string]int, len(a.Organization.Nodes))
+	parentByAgent := make(map[string]string, len(a.Organization.Nodes))
+	for i, node := range a.Organization.Nodes {
+		if _, ok := knownAgents[node.AgentID]; !ok {
+			return fmt.Errorf("agents.organization.nodes[%d].agent_id %q is not a configured agent", i, node.AgentID)
+		}
+		if first, ok := seenNodes[node.AgentID]; ok {
+			return fmt.Errorf("agents.organization.nodes[%d].agent_id %q duplicates nodes[%d]", i, node.AgentID, first)
+		}
+		if node.ParentAgentID != "" {
+			if _, ok := knownAgents[node.ParentAgentID]; !ok {
+				return fmt.Errorf(
+					"agents.organization.nodes[%d].parent_agent_id %q is not a configured agent",
+					i,
+					node.ParentAgentID,
+				)
+			}
+		}
+		seenNodes[node.AgentID] = i
+		parentByAgent[node.AgentID] = node.ParentAgentID
+	}
+
+	if cycle := detectAgentOrganizationCycle(a.Organization.Nodes, parentByAgent); len(cycle) > 0 {
+		return fmt.Errorf("agents.organization contains reporting cycle: %s", strings.Join(cycle, " -> "))
+	}
+	return nil
+}
+
+func (o *AgentOrganizationConfig) RootAgentIDs() []string {
+	if o == nil {
+		return nil
+	}
+	if len(o.Roots) > 0 {
+		return slices.Clone(o.Roots)
+	}
+
+	var roots []AgentOrganizationNodeConfig
+	for _, node := range o.Nodes {
+		if node.ParentAgentID == "" {
+			roots = append(roots, node)
+		}
+	}
+	sortOrganizationNodes(roots)
+
+	ids := make([]string, 0, len(roots))
+	for _, node := range roots {
+		ids = append(ids, node.AgentID)
+	}
+	return ids
+}
+
+func (o *AgentOrganizationConfig) ChildrenOf(parentAgentID string) []AgentOrganizationNodeConfig {
+	if o == nil {
+		return nil
+	}
+
+	var children []AgentOrganizationNodeConfig
+	for _, node := range o.Nodes {
+		if node.ParentAgentID == parentAgentID {
+			children = append(children, node)
+		}
+	}
+	sortOrganizationNodes(children)
+	return children
+}
+
+func sortOrganizationNodes(nodes []AgentOrganizationNodeConfig) {
+	slices.SortFunc(nodes, func(a, b AgentOrganizationNodeConfig) int {
+		if bySort := cmp.Compare(a.Sort, b.Sort); bySort != 0 {
+			return bySort
+		}
+		return cmp.Compare(a.AgentID, b.AgentID)
+	})
+}
+
+func detectAgentOrganizationCycle(nodes []AgentOrganizationNodeConfig, parentByAgent map[string]string) []string {
+	state := make(map[string]int, len(nodes))
+
+	var visit func(agentID string, path []string) []string
+	visit = func(agentID string, path []string) []string {
+		switch state[agentID] {
+		case 1:
+			for i, pathAgentID := range path {
+				if pathAgentID == agentID {
+					return append(slices.Clone(path[i:]), agentID)
+				}
+			}
+			return []string{agentID, agentID}
+		case 2:
+			return nil
+		}
+
+		state[agentID] = 1
+		parentAgentID := parentByAgent[agentID]
+		if parentAgentID != "" {
+			if _, ok := parentByAgent[parentAgentID]; ok {
+				if cycle := visit(parentAgentID, append(path, agentID)); len(cycle) > 0 {
+					return cycle
+				}
+			}
+		}
+		state[agentID] = 2
+		return nil
+	}
+
+	for _, node := range nodes {
+		if cycle := visit(node.AgentID, nil); len(cycle) > 0 {
+			return cycle
+		}
+	}
+	return nil
 }
 
 type DispatchConfig struct {
@@ -1254,6 +1408,10 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Agents.Defaults.Workspace == "" {
 		homePath := GetHome()
 		cfg.Agents.Defaults.Workspace = filepath.Join(homePath, pkg.WorkspaceName)
+	}
+
+	if err = cfg.ValidateAgentOrganization(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

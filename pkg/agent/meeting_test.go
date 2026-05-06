@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,5 +210,191 @@ func TestRunAgentMeeting_PublishesEventBasedDiscordVisibilitySummaries(t *testin
 	}
 	if strings.Contains(joined, "PRIVATE_RAW_MEETING_NOTES") || strings.Contains(joined, "CMO:") || strings.Contains(joined, "CFO:") {
 		t.Fatalf("visibility summaries leaked internal meeting material:\n%s", joined)
+	}
+}
+
+type failingMeetingProvider struct {
+	err            error
+	cancelAfterCMO context.CancelFunc
+	cancelOnChair  context.CancelFunc
+	calls          []string
+	mu             sync.Mutex
+}
+
+func (p *failingMeetingProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	content := strings.Join(messageContents(messages), "\n")
+	p.mu.Lock()
+	p.calls = append(p.calls, content)
+	p.mu.Unlock()
+	switch {
+	case strings.Contains(content, "Target agent: cmo"):
+		if p.cancelAfterCMO != nil {
+			p.cancelAfterCMO()
+		}
+		return &providers.LLMResponse{Content: "CMO: use customer proof.", FinishReason: "stop"}, nil
+	case strings.Contains(content, "Target agent: cfo"):
+		return nil, p.err
+	case strings.Contains(content, "Consolidate this chaired meeting"):
+		if p.cancelOnChair != nil {
+			p.cancelOnChair()
+			return &providers.LLMResponse{Content: "Recommendation: proceed.", FinishReason: "stop"}, nil
+		}
+		return nil, p.err
+	default:
+		return &providers.LLMResponse{Content: "unexpected meeting turn", FinishReason: "stop"}, nil
+	}
+}
+
+func (p *failingMeetingProvider) GetDefaultModel() string {
+	return "provider-default"
+}
+
+func (p *failingMeetingProvider) callText() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return strings.Join(p.calls, "\n---\n")
+}
+
+func TestRunAgentMeeting_ParticipantFailureStopsBeforeChairSynthesis(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo", "cfo"}}},
+		{ID: "cmo"},
+		{ID: "cfo"},
+	})
+	providerErr := errors.New("cfo unavailable")
+	provider := &failingMeetingProvider{err: providerErr}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+
+	_, record, err := al.RunAgentMeeting(context.Background(), AgentMeetingRequest{
+		Title:               "Sales lift",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo", "cfo"},
+		Goal:                "Review plan.",
+	})
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("RunAgentMeeting() error = %v, want provider error", err)
+	}
+	rec, err := al.meetingRecords.Get(context.Background(), record.MeetingID)
+	if err != nil {
+		t.Fatalf("meetingRecords.Get() error = %v", err)
+	}
+	if rec.Status != AgentMeetingStatusFailed {
+		t.Fatalf("meeting status = %q, want failed", rec.Status)
+	}
+	if len(rec.ParticipantTurns) != 2 {
+		t.Fatalf("ParticipantTurns = %d, want successful and failed turn", len(rec.ParticipantTurns))
+	}
+	if rec.ParticipantTurns[1].AgentID != "cfo" || rec.ParticipantTurns[1].Status != "failed" {
+		t.Fatalf("failed participant turn = %#v", rec.ParticipantTurns[1])
+	}
+	if strings.Contains(provider.callText(), "Consolidate this chaired meeting") {
+		t.Fatalf("chair synthesis ran after required participant failure:\n%s", provider.callText())
+	}
+}
+
+func TestRunAgentMeeting_ChairFailureMarksMeetingFailed(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo"}}},
+		{ID: "cmo"},
+	})
+	providerErr := errors.New("chair synthesis failed")
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &failingMeetingProvider{err: providerErr})
+
+	_, record, err := al.RunAgentMeeting(context.Background(), AgentMeetingRequest{
+		Title:               "Sales lift",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo"},
+		Goal:                "Review plan.",
+	})
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("RunAgentMeeting() error = %v, want provider error", err)
+	}
+	rec, err := al.meetingRecords.Get(context.Background(), record.MeetingID)
+	if err != nil {
+		t.Fatalf("meetingRecords.Get() error = %v", err)
+	}
+	if rec.Status != AgentMeetingStatusFailed {
+		t.Fatalf("meeting status = %q, want failed", rec.Status)
+	}
+	if rec.ChairTurn != nil {
+		t.Fatalf("ChairTurn = %#v, want nil on chair failure", rec.ChairTurn)
+	}
+	if len(rec.ParticipantTurns) != 1 || rec.ParticipantTurns[0].Status != string(TurnEndStatusCompleted) {
+		t.Fatalf("ParticipantTurns = %#v, want completed participant preserved", rec.ParticipantTurns)
+	}
+}
+
+func TestRunAgentMeeting_CancelDuringParticipantPersistenceMarksMeetingCancelled(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo"}}},
+		{ID: "cmo"},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &failingMeetingProvider{cancelAfterCMO: cancel})
+
+	_, record, err := al.RunAgentMeeting(ctx, AgentMeetingRequest{
+		Title:               "Sales lift",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo"},
+		Goal:                "Review plan.",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunAgentMeeting() error = %v, want context.Canceled", err)
+	}
+	rec, err := al.meetingRecords.Get(context.Background(), record.MeetingID)
+	if err != nil {
+		t.Fatalf("meetingRecords.Get() error = %v", err)
+	}
+	if rec.Status != AgentMeetingStatusCancelled {
+		t.Fatalf("meeting status = %q, want cancelled", rec.Status)
+	}
+	if !strings.Contains(rec.Error, context.Canceled.Error()) {
+		t.Fatalf("meeting error = %q, want cancellation", rec.Error)
+	}
+}
+
+func TestRunAgentMeeting_CancelDuringCompletionMarksMeetingCancelled(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo"}}},
+		{ID: "cmo"},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &failingMeetingProvider{cancelOnChair: cancel})
+
+	_, record, err := al.RunAgentMeeting(ctx, AgentMeetingRequest{
+		Title:               "Sales lift",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo"},
+		Goal:                "Review plan.",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunAgentMeeting() error = %v, want context.Canceled", err)
+	}
+	rec, err := al.meetingRecords.Get(context.Background(), record.MeetingID)
+	if err != nil {
+		t.Fatalf("meetingRecords.Get() error = %v", err)
+	}
+	if rec.Status != AgentMeetingStatusCancelled {
+		t.Fatalf("meeting status = %q, want cancelled", rec.Status)
+	}
+	if rec.ChairTurn != nil {
+		t.Fatalf("ChairTurn = %#v, want nil when completion record write fails", rec.ChairTurn)
+	}
+	if len(rec.ParticipantTurns) != 1 {
+		t.Fatalf("ParticipantTurns = %d, want completed participant preserved", len(rec.ParticipantTurns))
 	}
 }

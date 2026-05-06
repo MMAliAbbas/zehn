@@ -52,11 +52,28 @@ turns while those turns are being collected, and the current implementation does
 not run multi-round back-and-forth discussion. The chair sees the collected
 participant positions during synthesis and owns the final recommendation.
 
+Meeting v1 uses a conservative required-participant failure policy:
+
+- Every participant listed in `participant_agent_ids` is required.
+- There is no implicit optional participant or partial-completion mode in v1.
+- A participant provider, tool, delegation, or permission failure records a
+  failed participant turn, marks the meeting failed, and stops before chair
+  synthesis.
+- A chair provider, tool, delegation, or internal synthesis failure marks the
+  meeting failed after preserving completed participant turns.
+- Context cancellation marks an already-created meeting record cancelled; if
+  cancellation happens before the record is created, the call returns the
+  cancellation error without a meeting record.
+- Record-store failures are returned to the caller. When a meeting record
+  already exists, PicoClaw attempts to mark it failed or cancelled before
+  returning the store error.
+
 Meeting records include:
 
 - meeting ID, title, sponsor, chair, and participants
 - goal, constraints, approvals, and artifact refs
 - participant turns and chair synthesis
+- failed participant turns when required participant collection fails
 - consolidated recommendation
 - timeline, risks, and follow-ups
 - optional GitHub artifact status

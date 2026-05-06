@@ -67,7 +67,7 @@ func (t *MeetingTool) Parameters() map[string]any {
 			},
 			"participant_agent_ids": map[string]any{
 				"type":        "array",
-				"description": "Configured participant agent IDs to consult privately in sequential meeting v1 turns.",
+				"description": "Configured required participant agent IDs to consult privately in sequential meeting v1 turns; any required participant failure stops the meeting.",
 				"items": map[string]any{
 					"type": "string",
 				},

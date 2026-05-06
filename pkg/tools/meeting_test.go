@@ -90,7 +90,7 @@ func TestMeetingTool_DescriptionNamesMeetingV1SequentialFlow(t *testing.T) {
 	if !ok {
 		t.Fatal("participant_agent_ids description should be a string")
 	}
-	for _, want := range []string{"sequential", "meeting v1"} {
+	for _, want := range []string{"sequential", "meeting v1", "required", "failure stops"} {
 		if !strings.Contains(participantDesc, want) {
 			t.Fatalf("participant_agent_ids description = %q, want %q", participantDesc, want)
 		}

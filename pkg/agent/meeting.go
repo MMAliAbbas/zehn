@@ -100,18 +100,17 @@ func (al *AgentLoop) RunAgentMeeting(
 			turn.Status = "failed"
 			turn.Response = err.Error()
 			_ = al.meetingRecords.AddParticipantTurn(context.Background(), record.MeetingID, turn)
-			_ = al.meetingRecords.Failed(context.Background(), record.MeetingID, err)
-			return AgentMeetingOutcome{}, record, err
+			return AgentMeetingOutcome{}, record, al.failAgentMeetingRecord(record.MeetingID, err)
 		}
 		if err := al.meetingRecords.AddParticipantTurn(ctx, record.MeetingID, turn); err != nil {
-			return AgentMeetingOutcome{}, record, err
+			return AgentMeetingOutcome{}, record, al.failAgentMeetingRecord(record.MeetingID, err)
 		}
 		turns = append(turns, turn)
 	}
 
 	chairResponse, err := al.runAgentMeetingChairTurn(ctx, record.MeetingID, req, turns)
 	if err != nil {
-		_ = al.meetingRecords.Failed(context.Background(), record.MeetingID, err)
+		err = al.failAgentMeetingRecord(record.MeetingID, err)
 		al.publishDiscordVisibilitySummary(context.Background(), visibilityEventBlockerRaised, fmt.Sprintf(
 			"Blocker raised: meeting %s chair=%s failed: %s.",
 			record.MeetingID,
@@ -128,7 +127,7 @@ func (al *AgentLoop) RunAgentMeeting(
 		AgentID:  req.ChairAgentID,
 		Response: chairResponse,
 	}, outcome); err != nil {
-		return AgentMeetingOutcome{}, record, err
+		return AgentMeetingOutcome{}, record, al.failAgentMeetingRecord(record.MeetingID, err)
 	}
 	al.publishMeetingRecommendationSummary(ctx, record)
 	record, err = al.meetingRecords.Get(ctx, record.MeetingID)
@@ -141,6 +140,16 @@ func (al *AgentLoop) RunAgentMeeting(
 		return AgentMeetingOutcome{}, record, err
 	}
 	return outcome, record, nil
+}
+
+func (al *AgentLoop) failAgentMeetingRecord(meetingID string, err error) error {
+	if err == nil {
+		err = errors.New("meeting failed")
+	}
+	if recordErr := al.meetingRecords.Failed(context.Background(), meetingID, err); recordErr != nil {
+		return errors.Join(err, fmt.Errorf("record meeting failure: %w", recordErr))
+	}
+	return err
 }
 
 func normalizeAgentMeetingRequest(req AgentMeetingRequest) AgentMeetingRequest {

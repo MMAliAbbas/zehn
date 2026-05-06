@@ -24,6 +24,7 @@ const (
 	AgentMeetingStatusStarted   AgentMeetingStatus = "started"
 	AgentMeetingStatusCompleted AgentMeetingStatus = "completed"
 	AgentMeetingStatusFailed    AgentMeetingStatus = "failed"
+	AgentMeetingStatusCancelled AgentMeetingStatus = "cancelled"
 )
 
 type AgentMeetingRecord struct {
@@ -142,8 +143,12 @@ func (s *MeetingRecordStore) Failed(ctx context.Context, meetingID string, err e
 	if err == nil {
 		err = errors.New("meeting failed")
 	}
+	status := AgentMeetingStatusFailed
+	if errors.Is(err, context.Canceled) {
+		status = AgentMeetingStatusCancelled
+	}
 	return s.update(ctx, meetingID, func(rec *AgentMeetingRecord, now time.Time) {
-		rec.Status = AgentMeetingStatusFailed
+		rec.Status = status
 		rec.CompletedAt = &now
 		rec.Error = s.redact(err.Error())
 	})

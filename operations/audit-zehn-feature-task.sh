@@ -25,6 +25,10 @@ pass() {
   printf 'PASS: %s\n' "$*"
 }
 
+warn() {
+  printf 'WARN: %s\n' "$*"
+}
+
 contains() {
   pattern="$1"
   grep -E "$pattern" "$TASK_FILE" >/dev/null 2>&1
@@ -38,6 +42,70 @@ allowed_paths_contain() {
     in_scope && $0 ~ pattern { found=1 }
     END { exit found ? 0 : 1 }
   ' "$TASK_FILE"
+}
+
+print_indented() {
+  sed 's/^/  - /'
+}
+
+filter_publishability_paths() {
+  grep -E '^(workspace/skills/|\.picoclaw/workspace/skills/|supervision/zehn_feature_tasks/|supervision/ZEHN_FEATURE_|supervision/ZEHN_UPSTREAM_PUBLISHING_CHECKLIST\.md)' || true
+}
+
+filter_private_skill_paths() {
+  grep -E '^(workspace/skills/|\.picoclaw/workspace/skills/)' || true
+}
+
+filter_supervision_artifact_paths() {
+  grep -E '^(supervision/zehn_feature_tasks/|supervision/ZEHN_FEATURE_|supervision/ZEHN_UPSTREAM_PUBLISHING_CHECKLIST\.md)' || true
+}
+
+audit_publishability() {
+  history_limit="${ZEHN_PUBLISHABILITY_HISTORY_LIMIT:-50}"
+
+  printf 'Publishability advisory audit\n'
+  printf 'History window: last %s commit(s) reachable from HEAD\n' "$history_limit"
+
+  current_skill_paths="$(git -C "$ROOT" ls-files | filter_private_skill_paths)"
+  if [ -n "$current_skill_paths" ]; then
+    warn "tracked private/local skill paths in current tree"
+    printf '%s\n' "$current_skill_paths" | print_indented
+  else
+    pass "no tracked private/local skill paths in current tree"
+  fi
+
+  history_skill_paths="$(git -C "$ROOT" log --name-only --format= -n "$history_limit" -- 2>/dev/null | filter_private_skill_paths | sort -u)"
+  if [ -n "$history_skill_paths" ]; then
+    warn "private/local skill paths in recent history"
+    printf '%s\n' "$history_skill_paths" | print_indented
+  else
+    pass "no private/local skill paths found in recent history"
+  fi
+
+  current_supervision_paths="$(git -C "$ROOT" ls-files | filter_supervision_artifact_paths)"
+  if [ -n "$current_supervision_paths" ]; then
+    warn "private supervision automation artifacts in current tree"
+    printf '%s\n' "$current_supervision_paths" | print_indented
+  else
+    pass "no private supervision automation artifacts in current tree"
+  fi
+
+  history_supervision_paths="$(git -C "$ROOT" log --name-only --format= -n "$history_limit" -- 2>/dev/null | filter_supervision_artifact_paths | sort -u)"
+  if [ -n "$history_supervision_paths" ]; then
+    warn "private supervision automation artifacts in recent history"
+    printf '%s\n' "$history_supervision_paths" | print_indented
+  else
+    pass "no private supervision automation artifacts found in recent history"
+  fi
+
+  history_publishability_paths="$(git -C "$ROOT" log --name-only --format= -n "$history_limit" -- 2>/dev/null | filter_publishability_paths | sort -u)"
+  if [ -n "$history_publishability_paths" ]; then
+    warn "branch history contains private automation paths; rebuild or split upstream branches only with explicit operator approval"
+  else
+    pass "recent branch history has no known private automation paths"
+  fi
+
+  printf 'Publishability advisory summary: warnings are non-blocking in this task audit; clean them before upstream push or PR.\n'
 }
 
 write_minimal_task() {
@@ -146,8 +214,50 @@ run_runner_scope_self_test() {
   printf 'PASS: runner scope self-test\n'
 }
 
+run_publishability_self_test() {
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/zehn-publishability.XXXXXX")" || return 1
+  trap 'rm -rf "$tmp"' EXIT
+
+  mkdir -p "$tmp/workspace/skills/private" "$tmp/supervision/zehn_feature_tasks"
+  git -C "$tmp" init -q || return 1
+  git -C "$tmp" config user.email "zehn-publishability@example.invalid" || return 1
+  git -C "$tmp" config user.name "Zehn Publishability Test" || return 1
+
+  printf 'private skill\n' > "$tmp/workspace/skills/private/SKILL.md"
+  printf 'private task\n' > "$tmp/supervision/zehn_feature_tasks/task_private.md"
+  git -C "$tmp" add . || return 1
+  git -C "$tmp" commit -q -m "seed private artifacts" || return 1
+  git -C "$tmp" rm -q "$tmp/workspace/skills/private/SKILL.md" || return 1
+  git -C "$tmp" commit -q -m "remove current private skill" || return 1
+  mkdir -p "$tmp/workspace/skills/local"
+  printf 'current private skill\n' > "$tmp/workspace/skills/local/SKILL.md"
+  git -C "$tmp" add "$tmp/workspace/skills/local/SKILL.md" || return 1
+  git -C "$tmp" commit -q -m "add current private skill" || return 1
+
+  output="$(ROOT="$tmp" audit_publishability 2>&1)" || return 1
+  printf '%s\n' "$output" | grep -q 'WARN: tracked private/local skill paths in current tree' || {
+    printf 'FAIL: publishability audit did not report current private skill paths\n'
+    return 1
+  }
+  printf '%s\n' "$output" | grep -q 'WARN: private/local skill paths in recent history' || {
+    printf 'FAIL: publishability audit did not report historical private skill paths\n'
+    return 1
+  }
+  printf '%s\n' "$output" | grep -q 'WARN: private supervision automation artifacts in current tree' || {
+    printf 'FAIL: publishability audit did not report supervision artifacts\n'
+    return 1
+  }
+
+  printf 'PASS: publishability self-test\n'
+}
+
 if [ "$TASK" = "--runner-scope-self-test" ]; then
   run_runner_scope_self_test
+  exit $?
+fi
+
+if [ "$TASK" = "--publishability-self-test" ]; then
+  run_publishability_self_test
   exit $?
 fi
 
@@ -184,6 +294,10 @@ if grep -E "logicigniter|LogicIgniter|/Users/ali/projects|/Users/aliai/logicigni
   fail "task contains LogicIgniter/final-readiness leakage"
 else
   pass "no LogicIgniter leakage"
+fi
+
+if [ "$TASK" = "021-upstream-publishability-audit" ]; then
+  audit_publishability
 fi
 
 if contains '^Docs-only allowed: no$'; then

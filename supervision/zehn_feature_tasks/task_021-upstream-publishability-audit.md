@@ -54,6 +54,7 @@ upstream-facing push or pull request.
 cd /Users/aliai/zehn
 bash -n operations/run-one-zehn-feature-task.sh
 bash -n operations/audit-zehn-feature-task.sh
+operations/audit-zehn-feature-task.sh --publishability-self-test
 go test ./pkg/agent -run '^$' -count=1
 test -f supervision/ZEHN_UPSTREAM_PUBLISHING_CHECKLIST.md
 grep -i 'history' supervision/ZEHN_UPSTREAM_PUBLISHING_CHECKLIST.md

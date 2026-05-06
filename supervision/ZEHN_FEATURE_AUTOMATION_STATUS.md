@@ -26,8 +26,8 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 016-async-github-artifact-publisher | green | `runner-016-async-github-artifact-publisher-20260506042728.log` | host verified |
 | 017-staged-local-live-verification | green | `runner-017-staged-local-live-verification-20260506044050.log` | host verified |
 
-Total green: 17 / 17
+Total green: 17 / 23
 
 ## Not Green In This Ledger
 
-All Zehn feature tasks have host-runner green evidence.
+`018-redacted-github-artifacts`, `019-fail-closed-delegation-status`, `020-runtime-owned-github-artifact-publisher`, `021-upstream-publishability-audit`, `022-generic-memory-artifact-metadata`, `023-meeting-participant-failure-policy`

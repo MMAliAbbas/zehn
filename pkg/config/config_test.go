@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -811,6 +812,60 @@ func TestDefaultConfig_DelegateToolDisabled(t *testing.T) {
 	}
 	if cfg.Tools.IsToolEnabled("delegation_status") {
 		t.Fatal("delegation_status should be disabled unless explicitly enabled")
+	}
+}
+
+func TestDefaultConfig_DelegationMemoryMetadataIsGeneric(t *testing.T) {
+	cfg := DefaultConfig()
+	metadata := cfg.Agents.Defaults.DelegationMemory.Metadata
+	if metadata.ProjectKey != "picoclaw" {
+		t.Fatalf("ProjectKey = %q, want picoclaw", metadata.ProjectKey)
+	}
+	if metadata.Source != "picoclaw-delegation" {
+		t.Fatalf("Source = %q, want picoclaw-delegation", metadata.Source)
+	}
+	if got, want := metadata.Labels, []string{"picoclaw"}; !slices.Equal(got, want) {
+		t.Fatalf("Labels = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadConfig_DelegationMemoryMetadataCanBeConfigured(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(
+		configPath,
+		[]byte(`{
+			"version": 3,
+			"agents": {
+				"defaults": {
+					"delegation_memory": {
+						"metadata": {
+							"project_key": "private-runtime",
+							"labels": ["recognizable-source"],
+							"source": "private-delegation"
+						}
+					}
+				}
+			}
+		}`),
+		0o600,
+	); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	metadata := cfg.Agents.Defaults.DelegationMemory.Metadata
+	if metadata.ProjectKey != "private-runtime" {
+		t.Fatalf("ProjectKey = %q, want private-runtime", metadata.ProjectKey)
+	}
+	if metadata.Source != "private-delegation" {
+		t.Fatalf("Source = %q, want private-delegation", metadata.Source)
+	}
+	if got, want := metadata.Labels, []string{"recognizable-source"}; !slices.Equal(got, want) {
+		t.Fatalf("Labels = %#v, want %#v", got, want)
 	}
 }
 

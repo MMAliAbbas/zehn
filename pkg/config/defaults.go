@@ -37,6 +37,13 @@ func DefaultConfig() *Config {
 				AsyncDelegation: AsyncDelegationConfig{
 					MaxConcurrent: 4,
 				},
+				DelegationMemory: DelegationMemoryConfig{
+					Metadata: DelegationMemoryMetadataConfig{
+						ProjectKey: "picoclaw",
+						Labels:     []string{"picoclaw"},
+						Source:     "picoclaw-delegation",
+					},
+				},
 				ToolFeedback: ToolFeedbackConfig{
 					Enabled:          false,
 					MaxArgsLength:    300,

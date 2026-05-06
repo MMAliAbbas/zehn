@@ -10,6 +10,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/sipeed/picoclaw/pkg/config"
 	picoclawmcp "github.com/sipeed/picoclaw/pkg/mcp"
 )
 
@@ -33,7 +34,11 @@ var delegationMemoryWriterForAgentLoop = func(al *AgentLoop) DelegationMemoryWri
 	if manager == nil {
 		return nil
 	}
-	return NewYaadDelegationMemoryWriter(manager, yaadDelegationMemoryServerName(manager))
+	metadata := config.DelegationMemoryMetadataConfig{}
+	if al.cfg != nil {
+		metadata = al.cfg.Agents.Defaults.DelegationMemory.Metadata
+	}
+	return NewYaadDelegationMemoryWriterWithMetadata(manager, yaadDelegationMemoryServerName(manager), metadata)
 }
 
 var delegationMemoryStrictForAgentLoop = func(al *AgentLoop) bool {
@@ -43,9 +48,18 @@ var delegationMemoryStrictForAgentLoop = func(al *AgentLoop) bool {
 type YaadDelegationMemoryWriter struct {
 	caller     delegationMCPToolCaller
 	serverName string
+	metadata   config.DelegationMemoryMetadataConfig
 }
 
 func NewYaadDelegationMemoryWriter(caller delegationMCPToolCaller, serverName string) *YaadDelegationMemoryWriter {
+	return NewYaadDelegationMemoryWriterWithMetadata(caller, serverName, config.DelegationMemoryMetadataConfig{})
+}
+
+func NewYaadDelegationMemoryWriterWithMetadata(
+	caller delegationMCPToolCaller,
+	serverName string,
+	metadata config.DelegationMemoryMetadataConfig,
+) *YaadDelegationMemoryWriter {
 	serverName = strings.TrimSpace(serverName)
 	if serverName == "" {
 		serverName = "yaad"
@@ -53,6 +67,7 @@ func NewYaadDelegationMemoryWriter(caller delegationMCPToolCaller, serverName st
 	return &YaadDelegationMemoryWriter{
 		caller:     caller,
 		serverName: serverName,
+		metadata:   normalizeDelegationMemoryMetadata(metadata),
 	}
 }
 
@@ -63,7 +78,7 @@ func (w *YaadDelegationMemoryWriter) WriteDelegationMemory(
 	if w == nil || w.caller == nil {
 		return AgentDelegationMemoryWrite{}, errors.New("yaad delegation memory writer is unavailable")
 	}
-	args := yaadDelegationMemoryAddArgs(rec)
+	args := yaadDelegationMemoryAddArgsWithMetadata(rec, w.metadata)
 	result, err := w.caller.CallTool(ctx, w.serverName, "memory_add", args)
 	if err != nil {
 		return AgentDelegationMemoryWrite{}, err
@@ -173,6 +188,14 @@ func yaadDelegationMemoryServerName(manager *picoclawmcp.Manager) string {
 }
 
 func yaadDelegationMemoryAddArgs(rec AgentDelegationRecord) map[string]any {
+	return yaadDelegationMemoryAddArgsWithMetadata(rec, config.DelegationMemoryMetadataConfig{})
+}
+
+func yaadDelegationMemoryAddArgsWithMetadata(
+	rec AgentDelegationRecord,
+	metadata config.DelegationMemoryMetadataConfig,
+) map[string]any {
+	metadata = normalizeDelegationMemoryMetadata(metadata)
 	return map[string]any{
 		"memory_class": "summary",
 		"title":        fmt.Sprintf("Delegation %s: %s to %s", rec.DelegationID, rec.ParentAgentID, rec.TargetAgentID),
@@ -181,7 +204,7 @@ func yaadDelegationMemoryAddArgs(rec AgentDelegationRecord) map[string]any {
 			{
 				"scope": map[string]any{
 					"scope_type":   "project",
-					"external_key": "zehn",
+					"external_key": metadata.ProjectKey,
 				},
 			},
 			{
@@ -197,15 +220,55 @@ func yaadDelegationMemoryAddArgs(rec AgentDelegationRecord) map[string]any {
 				},
 			},
 		},
-		"labels": []string{
-			"zehn",
-			"delegation",
-			string(rec.Status),
-			rec.ParentAgentID,
-			rec.TargetAgentID,
-		},
-		"source": "picoclaw-delegation",
+		"labels": delegationMemoryLabels(metadata, rec),
+		"source": metadata.Source,
 	}
+}
+
+func normalizeDelegationMemoryMetadata(
+	metadata config.DelegationMemoryMetadataConfig,
+) config.DelegationMemoryMetadataConfig {
+	metadata.ProjectKey = strings.TrimSpace(metadata.ProjectKey)
+	if metadata.ProjectKey == "" {
+		metadata.ProjectKey = "picoclaw"
+	}
+	metadata.Source = strings.TrimSpace(metadata.Source)
+	if metadata.Source == "" {
+		metadata.Source = "picoclaw-delegation"
+	}
+	labels := make([]string, 0, len(metadata.Labels))
+	for _, label := range metadata.Labels {
+		label = strings.TrimSpace(label)
+		if label != "" {
+			labels = append(labels, label)
+		}
+	}
+	if len(labels) == 0 {
+		labels = []string{"picoclaw"}
+	}
+	metadata.Labels = labels
+	return metadata
+}
+
+func delegationMemoryLabels(
+	metadata config.DelegationMemoryMetadataConfig,
+	rec AgentDelegationRecord,
+) []string {
+	metadata = normalizeDelegationMemoryMetadata(metadata)
+	labels := make([]string, 0, len(metadata.Labels)+4)
+	seen := make(map[string]struct{}, len(metadata.Labels)+4)
+	for _, label := range append(metadata.Labels, "delegation", string(rec.Status), rec.ParentAgentID, rec.TargetAgentID) {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		labels = append(labels, label)
+	}
+	return labels
 }
 
 func yaadDelegationMemoryContent(rec AgentDelegationRecord) string {

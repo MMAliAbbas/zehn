@@ -414,6 +414,81 @@ func TestDelegationYaadMemoryMCPAdapterCallsMemoryAdd(t *testing.T) {
 	}
 }
 
+func TestDelegationYaadMemoryDefaultMetadataIsGeneric(t *testing.T) {
+	args := yaadDelegationMemoryAddArgs(AgentDelegationRecord{
+		DelegationID:  "delegation-1",
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Status:        AgentDelegationStatusCompleted,
+	})
+
+	if got := memoryProjectScopeExternalKeyForTest(t, args); got != "picoclaw" {
+		t.Fatalf("project scope external_key = %q, want picoclaw", got)
+	}
+	labels := memoryLabelsForTest(t, args)
+	for _, want := range []string{"picoclaw", "delegation", "completed", "parent", "target"} {
+		if !containsString(labels, want) {
+			t.Fatalf("labels = %#v, want %q", labels, want)
+		}
+	}
+}
+
+func TestDelegationYaadMemoryConfiguredMetadataPreservesCoreSemantics(t *testing.T) {
+	caller := &recordingDelegationMCPCaller{
+		result: &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{
+				&sdkmcp.TextContent{Text: `{"memory_id":"mem_configured"}`},
+			},
+		},
+	}
+	writer := NewYaadDelegationMemoryWriterWithMetadata(caller, "yaad", config.DelegationMemoryMetadataConfig{
+		ProjectKey: "private-runtime",
+		Labels:     []string{"recognizable-source"},
+		Source:     "private-delegation",
+	})
+	rec := AgentDelegationRecord{
+		DelegationID:  "delegation-1",
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Status:        AgentDelegationStatusCompleted,
+		Request: AgentDelegationRecordRequest{
+			Task: "request body",
+		},
+		Result: &AgentDelegationRecordResult{
+			Content: "final answer",
+			Status:  TurnEndStatusCompleted,
+		},
+	}
+
+	write, err := writer.WriteDelegationMemory(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("WriteDelegationMemory() error = %v", err)
+	}
+	if write.Status != AgentDelegationMemoryStatusWritten || write.MemoryID != "mem_configured" {
+		t.Fatalf("write = %#v, want configured memory write without semantic changes", write)
+	}
+
+	caller.mu.Lock()
+	args := caller.arguments
+	caller.mu.Unlock()
+	if got := memoryProjectScopeExternalKeyForTest(t, args); got != "private-runtime" {
+		t.Fatalf("project scope external_key = %q, want configured private-runtime", got)
+	}
+	if source, ok := args["source"].(string); !ok || source != "private-delegation" {
+		t.Fatalf("source = %#v, want configured private-delegation", args["source"])
+	}
+	labels := memoryLabelsForTest(t, args)
+	for _, want := range []string{"recognizable-source", "delegation", "completed", "parent", "target"} {
+		if !containsString(labels, want) {
+			t.Fatalf("labels = %#v, want %q", labels, want)
+		}
+	}
+	rawContent, ok := args["raw_content"].(string)
+	if !ok || !strings.Contains(rawContent, `"result"`) || !strings.Contains(rawContent, "final answer") {
+		t.Fatalf("raw_content = %#v, want delegation result payload preserved", args["raw_content"])
+	}
+}
+
 type recordingDelegationMemoryWriter struct {
 	mu      sync.Mutex
 	records []AgentDelegationRecord
@@ -503,4 +578,45 @@ func equalDelegationStatuses(a, b []AgentDelegationStatus) bool {
 		}
 	}
 	return true
+}
+
+func memoryProjectScopeExternalKeyForTest(t *testing.T, args map[string]any) string {
+	t.Helper()
+	scopes, ok := args["scopes"].([]map[string]any)
+	if !ok {
+		t.Fatalf("scopes = %#v, want []map[string]any", args["scopes"])
+	}
+	for _, item := range scopes {
+		scope, ok := item["scope"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if scope["scope_type"] == "project" {
+			externalKey, ok := scope["external_key"].(string)
+			if !ok {
+				t.Fatalf("project external_key = %#v, want string", scope["external_key"])
+			}
+			return externalKey
+		}
+	}
+	t.Fatal("project scope not found")
+	return ""
+}
+
+func memoryLabelsForTest(t *testing.T, args map[string]any) []string {
+	t.Helper()
+	labels, ok := args["labels"].([]string)
+	if !ok {
+		t.Fatalf("labels = %#v, want []string", args["labels"])
+	}
+	return labels
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }

@@ -1,11 +1,37 @@
 # Zehn Feature Live Verification
 
-Updated: 2026-05-06T04:43:03+05:00
+Updated: 2026-05-06T06:35:00+05:00
 
 This is the staged local rollout plan for Zehn delegation and meeting behavior.
 The default path is deterministic and local-only. It must not send live Discord
 messages, must not write live GitHub issues or comments, and must not write live
 Yaad memories.
+
+## Current Standing
+
+Implementation status:
+
+- Feature automation tasks `001` through `023` are green.
+- Delegation and meeting code audits passed focused normal and race tests.
+- The remaining Zehn work is runtime rollout, config verification, and live
+  staged validation.
+- Upstream publishability is intentionally parked until Zehn has more live
+  confidence; this local branch contains private skills/supervision history and
+  must not be treated as an upstream-ready branch.
+
+Runtime rollout checklist:
+
+1. Rebuild the current source into the launcher and CLI binaries.
+2. Restart through the launcher UI so gateway lifecycle stays standard.
+3. Confirm active config path is the intended `PICOCLAW_HOME`.
+4. Confirm `delegate_to_agent`, `delegation_status`, `delegation_inbox`, and
+   `start_agent_meeting` are enabled only for intended agents.
+5. Keep GitHub artifact writer disabled for the first local tests.
+6. Run local CLI/Web delegation smoke.
+7. Run local CLI/Web meeting smoke.
+8. Enable Yaad MCP and verify one terminal delegation memory write.
+9. Run one narrow Discord command in the allowlisted channel.
+10. Enable GitHub artifacts last, using one low-risk approval/follow-up test.
 
 ## Baseline Local Smoke
 

@@ -113,6 +113,15 @@ known structured log fields such as `agent_id`, `target_agent_id`,
 `parent_agent_id`, `chair_agent_id`, or `sponsor_agent_id`; malformed or
 unrelated log lines are ignored.
 
+The launcher organization page is read-only. It uses `GET
+/api/agents/organization` for the initial hierarchy, `GET
+/api/agents/{id}/activity` for a single agent's page-equivalent status and
+counters, and the `inbox`, `outbox`, and `meetings` drill-down endpoints for
+record lists. Loading these endpoints must not mutate launcher config, local
+records, durable memory, channel state, or external artifacts. See [Agent
+Organization Live Verification](agent-organization-live-verification.md) for
+operator checks and badge meanings.
+
 ## Meeting V1 Workflow
 
 `start_agent_meeting` starts meeting v1: a private chaired sequential meeting.

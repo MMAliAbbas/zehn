@@ -120,6 +120,14 @@ export async function getAgentOrganization(): Promise<AgentOrganizationSnapshot>
   return request<AgentOrganizationSnapshot>("/api/agents/organization")
 }
 
+export async function getAgentActivity(
+  agentID: string,
+): Promise<AgentOrganizationAgent> {
+  return request<AgentOrganizationAgent>(
+    `/api/agents/${encodeURIComponent(agentID)}/activity`,
+  )
+}
+
 export async function getAgentInbox(
   agentID: string,
   limit?: number,

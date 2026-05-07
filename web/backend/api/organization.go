@@ -142,6 +142,7 @@ type agentOrganizationBuildState struct {
 // registerAgentOrganizationRoutes binds read-only configured agent organization endpoints.
 func (h *Handler) registerAgentOrganizationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/organization", h.handleGetAgentOrganization)
+	mux.HandleFunc("GET /api/agents/{id}/activity", h.handleGetAgentActivity)
 	mux.HandleFunc("GET /api/agents/{id}/inbox", h.handleGetAgentInbox)
 	mux.HandleFunc("GET /api/agents/{id}/outbox", h.handleGetAgentOutbox)
 	mux.HandleFunc("GET /api/agents/{id}/meetings", h.handleGetAgentMeetings)
@@ -165,6 +166,29 @@ func (h *Handler) handleGetAgentOrganization(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (h *Handler) handleGetAgentActivity(w http.ResponseWriter, r *http.Request) {
+	cfg, agentID, _, ok := h.loadAgentActivityRequest(w, r)
+	if !ok {
+		return
+	}
+
+	snapshot, err := buildAgentOrganizationSnapshot(r.Context(), cfg)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load agent activity: %v", err), http.StatusInternalServerError)
+		return
+	}
+	agentState, ok := snapshot.Agents[agentID]
+	if !ok {
+		http.Error(w, fmt.Sprintf("unknown agent %q", agentID), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(agentState); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
 }

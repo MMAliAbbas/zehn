@@ -83,6 +83,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Model list management
 	h.registerModelRoutes(mux)
 
+	// Configured agent organization and activity summary
+	h.registerAgentOrganizationRoutes(mux)
+
 	// Channel catalog (for frontend navigation/config pages)
 	h.registerChannelRoutes(mux)
 

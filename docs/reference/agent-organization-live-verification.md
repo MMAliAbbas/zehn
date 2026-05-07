@@ -18,6 +18,19 @@ memory, channel state, GitHub artifacts, Discord messages, or other external
 artifacts. They only read launcher config, local delegation and meeting record
 directories, and bounded gateway log lines for recent-event enrichment.
 
+## Refresh Behavior
+
+The Agent > Organization page is a near-live operational dashboard based on
+conservative polling, not a guaranteed realtime event stream. While the page is
+mounted, the organization snapshot refreshes every 15 seconds. When an agent
+detail drawer is open, the inbox, outbox, and meetings drill-downs also refresh
+every 15 seconds, but only for the currently visible tab. Closed drawers and
+hidden drill-down tabs do not continue polling their activity endpoints.
+
+Background refreshes keep the last visible content on screen. Initial loading
+and full-page error states are reserved for the first request before any usable
+snapshot or drill-down data has been loaded.
+
 ## Badge Meanings
 
 - `Idle`: the agent is configured and has no newer active or failed structured

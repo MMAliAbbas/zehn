@@ -54,12 +54,15 @@ interface OrderedNode extends AgentOrganizationNode {
 type AgentDetailTab = "overview" | "inbox" | "outbox" | "meetings" | "recent"
 
 const AGENT_DETAIL_LIMIT = 25
+const ORGANIZATION_REFRESH_INTERVAL_MS = 15_000
+const AGENT_DETAIL_REFRESH_INTERVAL_MS = 15_000
 
 export function OrganizationPage() {
   const { t } = useTranslation()
   const organizationQuery = useQuery({
     queryKey: ["agents", "organization"],
     queryFn: getAgentOrganization,
+    refetchInterval: ORGANIZATION_REFRESH_INTERVAL_MS,
   })
 
   const roots = useMemo(
@@ -73,7 +76,7 @@ export function OrganizationPage() {
 
       <div className="flex-1 overflow-auto px-6 py-6 pb-20">
         <div className="mx-auto w-full max-w-7xl space-y-4">
-          {organizationQuery.isLoading ? (
+          {organizationQuery.isLoading && !organizationQuery.data ? (
             <StatePanel
               icon={<IconLoader2 className="size-4 animate-spin" />}
               title={t(
@@ -85,7 +88,7 @@ export function OrganizationPage() {
                 "Reading configured agents and current activity.",
               )}
             />
-          ) : organizationQuery.error ? (
+          ) : organizationQuery.error && !organizationQuery.data ? (
             <StatePanel
               icon={<IconAlertTriangle className="size-4" />}
               title={t(
@@ -327,16 +330,24 @@ function AgentDetailSheet({
     queryKey: ["agents", agent.id, "inbox", AGENT_DETAIL_LIMIT],
     queryFn: () => getAgentInbox(agent.id, AGENT_DETAIL_LIMIT),
     enabled: open && activeTab === "inbox",
+    refetchInterval:
+      open && activeTab === "inbox" ? AGENT_DETAIL_REFRESH_INTERVAL_MS : false,
   })
   const outboxQuery = useQuery({
     queryKey: ["agents", agent.id, "outbox", AGENT_DETAIL_LIMIT],
     queryFn: () => getAgentOutbox(agent.id, AGENT_DETAIL_LIMIT),
     enabled: open && activeTab === "outbox",
+    refetchInterval:
+      open && activeTab === "outbox" ? AGENT_DETAIL_REFRESH_INTERVAL_MS : false,
   })
   const meetingsQuery = useQuery({
     queryKey: ["agents", agent.id, "meetings", AGENT_DETAIL_LIMIT],
     queryFn: () => getAgentMeetings(agent.id, AGENT_DETAIL_LIMIT),
     enabled: open && activeTab === "meetings",
+    refetchInterval:
+      open && activeTab === "meetings"
+        ? AGENT_DETAIL_REFRESH_INTERVAL_MS
+        : false,
   })
 
   const tabs: Array<{ key: AgentDetailTab; label: string; count?: number }> = [
@@ -511,7 +522,7 @@ function DelegationRecordsPanel({
   query: UseQueryResult<Awaited<ReturnType<typeof getAgentInbox>>, Error>
 }) {
   const { t } = useTranslation()
-  if (query.isLoading) {
+  if (query.isLoading && !query.data) {
     return (
       <TabState
         loading
@@ -519,7 +530,7 @@ function DelegationRecordsPanel({
       />
     )
   }
-  if (query.error) {
+  if (query.error && !query.data) {
     return (
       <TabState
         destructive
@@ -617,7 +628,7 @@ function MeetingRecordsPanel({
   query: UseQueryResult<Awaited<ReturnType<typeof getAgentMeetings>>, Error>
 }) {
   const { t } = useTranslation()
-  if (query.isLoading) {
+  if (query.isLoading && !query.data) {
     return (
       <TabState
         loading
@@ -625,7 +636,7 @@ function MeetingRecordsPanel({
       />
     )
   }
-  if (query.error) {
+  if (query.error && !query.data) {
     return (
       <TabState
         destructive

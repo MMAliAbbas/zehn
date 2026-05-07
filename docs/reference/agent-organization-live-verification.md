@@ -20,17 +20,27 @@ directories, and bounded gateway log lines for recent-event enrichment.
 
 ## Badge Meanings
 
-- `Idle`: the agent is configured and has no active or failed structured
-  activity selected as current.
-- `Working`: the newest highest-priority active delegation targets this agent.
-- `Delegating`: the newest highest-priority active delegation was requested by
-  this agent.
-- `Meeting`: the agent is sponsor, chair, or participant in an active meeting.
-- `Failed`: the newest highest-priority delegation or meeting record involving
-  the agent failed. Failure takes precedence over active work.
+- `Idle`: the agent is configured and has no newer active or failed structured
+  activity selected as current. A completed record can still appear as the
+  current activity while the badge is idle.
+- `Working`: the current selected record is an active delegation targeting this
+  agent.
+- `Delegating`: the current selected record is an active delegation requested
+  by this agent.
+- `Meeting`: the current selected record is a started meeting where this agent
+  is sponsor, chair, or participant.
+- `Failed`: the current selected record is the newest failed delegation or
+  meeting involving this agent and no newer active or completed record has
+  superseded it.
+
+Current activity is selected by record `updated_at` first, then by a stable
+tie-break: failed, meeting, working, delegating, completed, then idle. Failed
+records are retained separately through `last_failure` and error counters, so
+an old failure remains visible without permanently masking newer operational
+work.
 
 Recent gateway events can appear in the detail drawer, but they do not change
-badge status, counters, current activity, or failure precedence.
+badge status, counters, current activity, or structured-record selection.
 
 ## Preparation
 
@@ -107,9 +117,12 @@ Create or retain a failed delegation or meeting record for a configured agent.
 Expected result:
 
 - The related agent shows `Failed`.
-- The failed record is selected as current when it is the highest-priority
-  recent structured record.
+- The failed record is selected as current when it is the newest relevant
+  structured record.
 - The errors count increases for the related agent.
+- If a newer running delegation, started meeting, or completed record exists
+  for the same agent, the badge follows that newer current activity while the
+  failed record remains visible as `last_failure`.
 - Failure details are redacted to record status and identifiers; private error
   strings do not appear in launcher responses.
 

@@ -763,6 +763,9 @@ func shouldReplaceCurrentActivity(
 		return true
 	}
 	currentPriority := organizationPriorityForStatus(current)
+	if byTime := cmp.Compare(activityRecordUnixNano(candidate), activityRecordUnixNano(*current)); byTime != 0 {
+		return byTime > 0
+	}
 	if priority != currentPriority {
 		return priority > currentPriority
 	}
@@ -800,10 +803,11 @@ func activityRecordUnixNano(record agentOrganizationActivityRecord) int64 {
 
 const (
 	organizationStatusPriorityIdle       = 0
-	organizationStatusPriorityDelegating = 1
-	organizationStatusPriorityWorking    = 2
-	organizationStatusPriorityMeeting    = 3
-	organizationStatusPriorityFailed     = 4
+	organizationStatusPriorityCompleted  = 1
+	organizationStatusPriorityDelegating = 2
+	organizationStatusPriorityWorking    = 3
+	organizationStatusPriorityMeeting    = 4
+	organizationStatusPriorityFailed     = 5
 )
 
 func organizationPriorityForStatus(record *agentOrganizationActivityRecord) int {
@@ -812,6 +816,9 @@ func organizationPriorityForStatus(record *agentOrganizationActivityRecord) int 
 	}
 	if record.Status == "failed" {
 		return organizationStatusPriorityFailed
+	}
+	if record.Status == "completed" {
+		return organizationStatusPriorityCompleted
 	}
 	if record.Type == "meeting" && record.Status == string(agent.AgentMeetingStatusStarted) {
 		return organizationStatusPriorityMeeting
@@ -836,6 +843,8 @@ func delegationRecordPriority(status agent.AgentDelegationStatus, role string) i
 			return organizationStatusPriorityWorking
 		}
 		return organizationStatusPriorityDelegating
+	case agent.AgentDelegationStatusCompleted:
+		return organizationStatusPriorityCompleted
 	default:
 		return organizationStatusPriorityIdle
 	}
@@ -847,6 +856,8 @@ func meetingRecordPriority(status agent.AgentMeetingStatus) int {
 		return organizationStatusPriorityFailed
 	case agent.AgentMeetingStatusStarted:
 		return organizationStatusPriorityMeeting
+	case agent.AgentMeetingStatusCompleted:
+		return organizationStatusPriorityCompleted
 	default:
 		return organizationStatusPriorityIdle
 	}

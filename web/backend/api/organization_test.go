@@ -162,7 +162,69 @@ func TestHandleAgentOrganization_ActiveMeetingStatusUsesStructuredRecords(t *tes
 	}
 }
 
-func TestHandleAgentOrganization_FailedRecordTakesPrecedence(t *testing.T) {
+func TestHandleAgentOrganization_NewerActiveDelegationSupersedesOlderFailure(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	failed, err := store.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "failed work",
+	})
+	if err != nil {
+		t.Fatalf("Requested(failed) error = %v", err)
+	}
+	if err := store.Failed(context.Background(), failed.DelegationID, errors.New("private failure details")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+	failed.Status = agent.AgentDelegationStatusFailed
+	setDelegationCreatedAt(t, cfg, &failed, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	active, err := store.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "active work",
+	})
+	if err != nil {
+		t.Fatalf("Requested(active) error = %v", err)
+	}
+	if err := store.Running(context.Background(), active.DelegationID); err != nil {
+		t.Fatalf("Running(active) error = %v", err)
+	}
+	active.Status = agent.AgentDelegationStatusRunning
+	setDelegationCreatedAt(t, cfg, &active, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	if strings.Contains(httpRec.Body.String(), "private failure details") {
+		t.Fatalf("response leaked raw failure details: %s", httpRec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	worker := resp.Agents["worker"]
+	if status := worker.Status; status != agentOrganizationStatusWorking {
+		t.Fatalf("worker status = %q, want %q", status, agentOrganizationStatusWorking)
+	}
+	if current := worker.Activity.Current; current == nil || current.RecordID != active.DelegationID {
+		t.Fatalf("worker current = %+v, want active delegation %q", current, active.DelegationID)
+	}
+	if lastFailure := worker.Activity.LastFailure; lastFailure == nil || lastFailure.RecordID != failed.DelegationID {
+		t.Fatalf("worker last failure = %+v, want failed delegation %q", lastFailure, failed.DelegationID)
+	}
+	if worker.Activity.FailureCount != 1 {
+		t.Fatalf("worker failure count = %d, want 1", worker.Activity.FailureCount)
+	}
+}
+
+func TestHandleAgentOrganization_NewerFailureRemainsCurrentWithoutNewerActiveRecord(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{
 			{ID: "lead", Name: "Lead"},
@@ -182,6 +244,9 @@ func TestHandleAgentOrganization_FailedRecordTakesPrecedence(t *testing.T) {
 	if err := store.Running(context.Background(), active.DelegationID); err != nil {
 		t.Fatalf("Running(active) error = %v", err)
 	}
+	active.Status = agent.AgentDelegationStatusRunning
+	setDelegationCreatedAt(t, cfg, &active, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
 	failed, err := store.Requested(context.Background(), agent.AgentDelegationRequest{
 		ParentAgentID: "lead",
 		TargetAgentID: "worker",
@@ -193,6 +258,8 @@ func TestHandleAgentOrganization_FailedRecordTakesPrecedence(t *testing.T) {
 	if err := store.Failed(context.Background(), failed.DelegationID, errors.New("private failure details")); err != nil {
 		t.Fatalf("Failed() error = %v", err)
 	}
+	failed.Status = agent.AgentDelegationStatusFailed
+	setDelegationCreatedAt(t, cfg, &failed, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
 
 	httpRec := requestAgentOrganization(t, configPath)
 	if httpRec.Code != http.StatusOK {
@@ -209,6 +276,9 @@ func TestHandleAgentOrganization_FailedRecordTakesPrecedence(t *testing.T) {
 	}
 	if current := resp.Agents["worker"].Activity.Current; current == nil || current.RecordID != failed.DelegationID {
 		t.Fatalf("worker current = %+v, want failed delegation %q", current, failed.DelegationID)
+	}
+	if lastFailure := resp.Agents["worker"].Activity.LastFailure; lastFailure == nil || lastFailure.RecordID != failed.DelegationID {
+		t.Fatalf("worker last failure = %+v, want failed delegation %q", lastFailure, failed.DelegationID)
 	}
 }
 

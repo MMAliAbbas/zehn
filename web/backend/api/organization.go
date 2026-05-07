@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,6 +84,43 @@ type agentOrganizationActivitySummary struct {
 	ActiveCount     int `json:"active_count"`
 }
 
+type agentActivityListResponse[T any] struct {
+	AgentID string `json:"agent_id"`
+	Kind    string `json:"kind"`
+	Limit   int    `json:"limit"`
+	Records []T    `json:"records"`
+}
+
+type agentDelegationActivitySummary struct {
+	DelegationID  string     `json:"delegation_id"`
+	Status        string     `json:"status"`
+	ParentAgentID string     `json:"parent_agent_id"`
+	TargetAgentID string     `json:"target_agent_id"`
+	RequesterID   string     `json:"requester_id,omitempty"`
+	Role          string     `json:"role"`
+	Mode          string     `json:"mode,omitempty"`
+	Priority      string     `json:"priority,omitempty"`
+	ArtifactRefs  []string   `json:"artifact_refs,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+}
+
+type agentMeetingActivitySummary struct {
+	MeetingID      string     `json:"meeting_id"`
+	Status         string     `json:"status"`
+	Title          string     `json:"title,omitempty"`
+	SponsorAgentID string     `json:"sponsor_agent_id"`
+	ChairAgentID   string     `json:"chair_agent_id"`
+	Participants   []string   `json:"participants,omitempty"`
+	Role           string     `json:"role"`
+	ArtifactRefs   []string   `json:"artifact_refs,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+}
+
 type agentOrganizationBuildState struct {
 	agents      map[string]*agentOrganizationAgent
 	delegations []agent.AgentDelegationRecord
@@ -92,6 +131,9 @@ type agentOrganizationBuildState struct {
 // registerAgentOrganizationRoutes binds read-only configured agent organization endpoints.
 func (h *Handler) registerAgentOrganizationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/organization", h.handleGetAgentOrganization)
+	mux.HandleFunc("GET /api/agents/{id}/inbox", h.handleGetAgentInbox)
+	mux.HandleFunc("GET /api/agents/{id}/outbox", h.handleGetAgentOutbox)
+	mux.HandleFunc("GET /api/agents/{id}/meetings", h.handleGetAgentMeetings)
 }
 
 // handleGetAgentOrganization returns a normalized configured agent hierarchy plus structured activity.
@@ -110,6 +152,236 @@ func (h *Handler) handleGetAgentOrganization(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (h *Handler) handleGetAgentInbox(w http.ResponseWriter, r *http.Request) {
+	cfg, agentID, limit, ok := h.loadAgentActivityRequest(w, r)
+	if !ok {
+		return
+	}
+
+	records, err := agent.NewDelegationRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "delegations"),
+		nil,
+	).List(r.Context(), agent.AgentDelegationRecordQuery{
+		VisibleToAgentID: agentID,
+		TargetAgentID:    agentID,
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load agent inbox: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	summaries := make([]agentDelegationActivitySummary, 0, min(len(records), limit))
+	for _, rec := range newestDelegationRecords(records, limit) {
+		summaries = append(summaries, summarizeDelegationActivity(rec, agentID, "target"))
+	}
+	writeAgentActivityResponse(w, agentActivityListResponse[agentDelegationActivitySummary]{
+		AgentID: agentID,
+		Kind:    "inbox",
+		Limit:   limit,
+		Records: summaries,
+	})
+}
+
+func (h *Handler) handleGetAgentOutbox(w http.ResponseWriter, r *http.Request) {
+	cfg, agentID, limit, ok := h.loadAgentActivityRequest(w, r)
+	if !ok {
+		return
+	}
+
+	records, err := agent.NewDelegationRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "delegations"),
+		nil,
+	).List(r.Context(), agent.AgentDelegationRecordQuery{IncludePrivateAll: true})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load agent outbox: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	related := make([]agent.AgentDelegationRecord, 0, len(records))
+	for _, rec := range records {
+		if delegationRequesterID(rec) == agentID {
+			related = append(related, rec)
+		}
+	}
+	summaries := make([]agentDelegationActivitySummary, 0, min(len(related), limit))
+	for _, rec := range newestDelegationRecords(related, limit) {
+		summaries = append(summaries, summarizeDelegationActivity(rec, agentID, "requester"))
+	}
+	writeAgentActivityResponse(w, agentActivityListResponse[agentDelegationActivitySummary]{
+		AgentID: agentID,
+		Kind:    "outbox",
+		Limit:   limit,
+		Records: summaries,
+	})
+}
+
+func (h *Handler) handleGetAgentMeetings(w http.ResponseWriter, r *http.Request) {
+	cfg, agentID, limit, ok := h.loadAgentActivityRequest(w, r)
+	if !ok {
+		return
+	}
+
+	records, err := agent.NewMeetingRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "meetings"),
+		nil,
+	).List(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load agent meetings: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	related := make([]agent.AgentMeetingRecord, 0, len(records))
+	for _, rec := range records {
+		if _, ok := meetingParticipantIDs(rec)[agentID]; ok {
+			related = append(related, rec)
+		}
+	}
+	summaries := make([]agentMeetingActivitySummary, 0, min(len(related), limit))
+	for _, rec := range newestMeetingRecords(related, limit) {
+		summaries = append(summaries, summarizeMeetingActivity(rec, agentID))
+	}
+	writeAgentActivityResponse(w, agentActivityListResponse[agentMeetingActivitySummary]{
+		AgentID: agentID,
+		Kind:    "meetings",
+		Limit:   limit,
+		Records: summaries,
+	})
+}
+
+func (h *Handler) loadAgentActivityRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+) (*config.Config, string, int, bool) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return nil, "", 0, false
+	}
+
+	agentID := strings.TrimSpace(r.PathValue("id"))
+	if !configuredAgentExists(cfg, agentID) {
+		http.Error(w, fmt.Sprintf("unknown agent %q", agentID), http.StatusNotFound)
+		return nil, "", 0, false
+	}
+	return cfg, agentID, parseAgentActivityLimit(r), true
+}
+
+func configuredAgentExists(cfg *config.Config, agentID string) bool {
+	if cfg == nil || agentID == "" {
+		return false
+	}
+	return slices.ContainsFunc(cfg.Agents.List, func(configured config.AgentConfig) bool {
+		return strings.TrimSpace(configured.ID) == agentID
+	})
+}
+
+func parseAgentActivityLimit(r *http.Request) int {
+	const (
+		defaultLimit = 50
+		maxLimit     = 100
+	)
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return defaultLimit
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return defaultLimit
+	}
+	return min(limit, maxLimit)
+}
+
+func newestDelegationRecords(records []agent.AgentDelegationRecord, limit int) []agent.AgentDelegationRecord {
+	records = append([]agent.AgentDelegationRecord(nil), records...)
+	slices.SortFunc(records, func(a, b agent.AgentDelegationRecord) int {
+		if byCreated := cmp.Compare(b.CreatedAt.UnixNano(), a.CreatedAt.UnixNano()); byCreated != 0 {
+			return byCreated
+		}
+		return cmp.Compare(b.DelegationID, a.DelegationID)
+	})
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	return records
+}
+
+func newestMeetingRecords(records []agent.AgentMeetingRecord, limit int) []agent.AgentMeetingRecord {
+	records = append([]agent.AgentMeetingRecord(nil), records...)
+	slices.SortFunc(records, func(a, b agent.AgentMeetingRecord) int {
+		if byCreated := cmp.Compare(b.CreatedAt.UnixNano(), a.CreatedAt.UnixNano()); byCreated != 0 {
+			return byCreated
+		}
+		return cmp.Compare(b.MeetingID, a.MeetingID)
+	})
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	return records
+}
+
+func summarizeDelegationActivity(
+	rec agent.AgentDelegationRecord,
+	agentID string,
+	role string,
+) agentDelegationActivitySummary {
+	if role == "" {
+		role = delegationRoleForAgent(rec, agentID)
+	}
+	return agentDelegationActivitySummary{
+		DelegationID:  rec.DelegationID,
+		Status:        string(rec.Status),
+		ParentAgentID: rec.ParentAgentID,
+		TargetAgentID: rec.TargetAgentID,
+		RequesterID:   delegationRequesterID(rec),
+		Role:          role,
+		Mode:          rec.Request.Mode,
+		Priority:      rec.Request.Priority,
+		ArtifactRefs:  append([]string(nil), rec.Request.ArtifactRefs...),
+		CreatedAt:     rec.CreatedAt,
+		UpdatedAt:     rec.UpdatedAt,
+		StartedAt:     rec.StartedAt,
+		CompletedAt:   rec.CompletedAt,
+	}
+}
+
+func delegationRoleForAgent(rec agent.AgentDelegationRecord, agentID string) string {
+	switch agentID {
+	case rec.TargetAgentID:
+		return "target"
+	case delegationRequesterID(rec):
+		return "requester"
+	default:
+		return "visible"
+	}
+}
+
+func summarizeMeetingActivity(rec agent.AgentMeetingRecord, agentID string) agentMeetingActivitySummary {
+	role := meetingParticipantIDs(rec)[agentID]
+	return agentMeetingActivitySummary{
+		MeetingID:      rec.MeetingID,
+		Status:         string(rec.Status),
+		Title:          rec.Title,
+		SponsorAgentID: rec.SponsorAgentID,
+		ChairAgentID:   rec.ChairAgentID,
+		Participants:   append([]string(nil), rec.Participants...),
+		Role:           role,
+		ArtifactRefs:   append([]string(nil), rec.ArtifactRefs...),
+		CreatedAt:      rec.CreatedAt,
+		UpdatedAt:      rec.UpdatedAt,
+		CompletedAt:    rec.CompletedAt,
+	}
+}
+
+func writeAgentActivityResponse[T any](w http.ResponseWriter, resp agentActivityListResponse[T]) {
+	if resp.Records == nil {
+		resp.Records = []T{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)

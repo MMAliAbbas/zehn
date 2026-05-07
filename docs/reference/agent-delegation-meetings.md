@@ -104,6 +104,15 @@ unknown parents, and reporting cycles. Organization metadata does not enable
 delegation by itself and does not change spawn, subagent, routing, session, or
 channel behavior.
 
+Organization activity status is derived from structured delegation and meeting
+records. Launcher gateway logs may be included as bounded recent-event
+enrichment for drill-down troubleshooting, but log-derived events are secondary
+evidence only: they do not override agent status, counts, current activity, or
+failure precedence. The API only exposes redacted, truncated summaries from
+known structured log fields such as `agent_id`, `target_agent_id`,
+`parent_agent_id`, `chair_agent_id`, or `sponsor_agent_id`; malformed or
+unrelated log lines are ignored.
+
 ## Meeting V1 Workflow
 
 `start_agent_meeting` starts meeting v1: a private chaired sequential meeting.

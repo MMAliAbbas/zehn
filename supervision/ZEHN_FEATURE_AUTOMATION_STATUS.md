@@ -1,6 +1,6 @@
 # Zehn Feature Automation Status
 
-Updated: 2026-05-07T05:41:23+05:00
+Updated: 2026-05-07T05:52:55+05:00
 
 This ledger is host-runner owned. A task is green only after its verification commands pass and related changes are reviewed according to the Zehn feature automation process.
 
@@ -36,9 +36,10 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 026-agent-inbox-outbox-api | green | `runner-026-agent-inbox-outbox-api-20260507051055.log` | host verified |
 | 027-agent-organization-frontend-page | green | `runner-027-agent-organization-frontend-page-20260507052203.log` | host verified |
 | 028-agent-activity-drilldown-frontend | green | `runner-028-agent-activity-drilldown-frontend-20260507053454.log` | host verified |
+| 029-agent-recent-events-log-enrichment | green | `runner-029-agent-recent-events-log-enrichment-20260507054625.log` | host verified |
 
-Total green: 28 / 30
+Total green: 29 / 30
 
 ## Not Green In This Ledger
 
-`029-agent-recent-events-log-enrichment`, `030-agent-organization-live-verification`
+`030-agent-organization-live-verification`

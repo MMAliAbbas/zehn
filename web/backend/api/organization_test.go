@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -223,6 +225,111 @@ func TestHandleAgentOrganization_MalformedConfigReturnsError(t *testing.T) {
 	}
 }
 
+func TestHandleAgentOrganization_NoLogsReturnsEmptyRecentEvents(t *testing.T) {
+	withIsolatedGatewayLogs(t)
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{{ID: "worker", Name: "Worker"}}
+	})
+
+	rec := requestAgentOrganization(t, configPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, rec, &resp)
+	if events := resp.Agents["worker"].Activity.RecentEvents; len(events) != 0 {
+		t.Fatalf("recent events = %+v, want empty", events)
+	}
+}
+
+func TestHandleAgentOrganization_RecentEventsIncludeMatchingStructuredGatewayLogs(t *testing.T) {
+	withIsolatedGatewayLogs(t)
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{{ID: "worker", Name: "Worker"}}
+	})
+	gateway.logs.Append(`{"level":"info","time":"2026-05-07T10:11:12Z","agent_id":"worker","event":"turn_started","message":"agent turn started"}`)
+
+	rec := requestAgentOrganization(t, configPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, rec, &resp)
+	agentState := resp.Agents["worker"]
+	if agentState.Status != agentOrganizationStatusIdle {
+		t.Fatalf("status = %q, want structured idle status", agentState.Status)
+	}
+	if len(agentState.Activity.RecentEvents) != 1 {
+		t.Fatalf("recent events = %+v, want one event", agentState.Activity.RecentEvents)
+	}
+	event := agentState.Activity.RecentEvents[0]
+	if event.AgentID != "worker" || event.Level != "info" || event.Message != "agent turn started" || event.Event != "turn_started" {
+		t.Fatalf("event = %+v, want parsed structured log fields", event)
+	}
+	if event.Timestamp == nil || !event.Timestamp.Equal(time.Date(2026, 5, 7, 10, 11, 12, 0, time.UTC)) {
+		t.Fatalf("timestamp = %+v, want parsed UTC timestamp", event.Timestamp)
+	}
+}
+
+func TestHandleAgentOrganization_RecentEventsIgnoreUnrelatedAndMalformedLogs(t *testing.T) {
+	withIsolatedGatewayLogs(t)
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "worker", Name: "Worker"},
+			{ID: "other", Name: "Other"},
+		}
+	})
+	gateway.logs.Append(`{"level":"info","agent_id":"other","message":"other event"}`)
+	gateway.logs.Append(`not json agent_id=worker message="should not break the page"`)
+	gateway.logs.Append(`{"level":"info","message":"missing agent should not match"}`)
+
+	rec := requestAgentOrganization(t, configPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, rec, &resp)
+	if events := resp.Agents["worker"].Activity.RecentEvents; len(events) != 0 {
+		t.Fatalf("worker recent events = %+v, want empty", events)
+	}
+	if events := resp.Agents["other"].Activity.RecentEvents; len(events) != 1 {
+		t.Fatalf("other recent events = %+v, want one matching event", events)
+	}
+}
+
+func TestHandleAgentOrganization_RecentEventsRedactSensitiveAndLongMessages(t *testing.T) {
+	withIsolatedGatewayLogs(t)
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{{ID: "worker", Name: "Worker"}}
+	})
+	longSecretMessage := "authorization=Bearer very-secret-token token=abc123 api_key=sk-private " + strings.Repeat("x", 220)
+	gateway.logs.Append(`{"level":"error","agent_id":"worker","message":` + strconv.Quote(longSecretMessage) + `}`)
+
+	rec := requestAgentOrganization(t, configPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"very-secret-token", "abc123", "sk-private"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("response leaked secret %q: %s", secret, body)
+		}
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, rec, &resp)
+	events := resp.Agents["worker"].Activity.RecentEvents
+	if len(events) != 1 {
+		t.Fatalf("recent events = %+v, want one redacted event", events)
+	}
+	if got := events[0].Message; len(got) > 180 || !strings.Contains(got, "[redacted]") {
+		t.Fatalf("redacted message = %q, want bounded message with redaction", got)
+	}
+}
+
 func writeOrganizationAPIConfig(t *testing.T, mutate func(*config.Config)) string {
 	t.Helper()
 
@@ -262,6 +369,17 @@ func requestAgentOrganization(t *testing.T, configPath string) *httptest.Respons
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/organization", nil)
 	mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func withIsolatedGatewayLogs(t *testing.T) {
+	t.Helper()
+
+	previous := gateway.logs
+	gateway.logs = NewLogBuffer(200)
+	gateway.logs.Reset()
+	t.Cleanup(func() {
+		gateway.logs = previous
+	})
 }
 
 func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, out any) {

@@ -17,11 +17,21 @@ export interface AgentOrganizationActivityRecord {
   updated_at?: string
 }
 
+export interface AgentOrganizationRecentEvent {
+  source: string
+  agent_id: string
+  level?: string
+  event?: string
+  message: string
+  timestamp?: string
+}
+
 export interface AgentOrganizationAgentActivity {
   inbox_count: number
   outbox_count: number
   meeting_count: number
   failure_count: number
+  recent_events?: AgentOrganizationRecentEvent[]
   current?: AgentOrganizationActivityRecord
   last_failure?: AgentOrganizationActivityRecord
   last_updated_at?: string

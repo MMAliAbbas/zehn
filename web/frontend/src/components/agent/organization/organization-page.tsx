@@ -21,6 +21,7 @@ import {
   type AgentOrganizationActivityRecord,
   type AgentOrganizationAgent,
   type AgentOrganizationNode,
+  type AgentOrganizationRecentEvent,
   type AgentOrganizationSnapshot,
   getAgentInbox,
   getAgentMeetings,
@@ -716,11 +717,12 @@ function MeetingRecordItem({ record }: { record: AgentMeetingActivityRecord }) {
 
 function RecentEventsPanel({ agent }: { agent: AgentOrganizationAgent }) {
   const { t } = useTranslation()
-  const events = compactActivityEvents(
+  const activityEvents = compactActivityEvents(
     agent.activity.current,
     agent.activity.last_failure,
   )
-  if (events.length === 0) {
+  const logEvents = agent.activity.recent_events ?? []
+  if (activityEvents.length === 0 && logEvents.length === 0) {
     return (
       <TabState
         title={t("pages.agent.organization.detail.empty", "No records")}
@@ -733,7 +735,7 @@ function RecentEventsPanel({ agent }: { agent: AgentOrganizationAgent }) {
   }
   return (
     <div className="space-y-2">
-      {events.map((event) => (
+      {activityEvents.map((event) => (
         <ActivityRecordFrame
           key={`${event.type}:${event.record_id}`}
           status={event.status}
@@ -764,7 +766,46 @@ function RecentEventsPanel({ agent }: { agent: AgentOrganizationAgent }) {
           </div>
         </ActivityRecordFrame>
       ))}
+      {logEvents.map((event, index) => (
+        <GatewayLogEventFrame
+          key={`${event.source}:${event.timestamp ?? "untimed"}:${index}`}
+          event={event}
+        />
+      ))}
     </div>
+  )
+}
+
+function GatewayLogEventFrame({
+  event,
+}: {
+  event: AgentOrganizationRecentEvent
+}) {
+  const { t } = useTranslation()
+  const status = event.level || event.event || "info"
+  return (
+    <ActivityRecordFrame status={status}>
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{event.message}</div>
+          <div className="text-muted-foreground mt-0.5 truncate font-mono text-xs">
+            {event.event ||
+              t("pages.agent.organization.detail.gateway_log", "gateway_log")}
+          </div>
+        </div>
+        <StatusBadge status={status} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <RecordFact
+          label={t("pages.agent.organization.detail.source", "Source")}
+          value={event.source}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.updated", "Updated")}
+          value={formatTimestamp(event.timestamp, t)}
+        />
+      </div>
+    </ActivityRecordFrame>
   )
 }
 
@@ -1042,7 +1083,12 @@ function shortRecordID(id: string) {
 
 function isProblemStatus(status: string) {
   const normalized = status.toLowerCase()
-  return normalized === "failed" || normalized === "blocked"
+  return (
+    normalized === "failed" ||
+    normalized === "blocked" ||
+    normalized === "error" ||
+    normalized === "fatal"
+  )
 }
 
 function errorMessage(error: unknown) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ type agentOrganizationAgentActivity struct {
 	OutboxCount   int                              `json:"outbox_count"`
 	MeetingCount  int                              `json:"meeting_count"`
 	FailureCount  int                              `json:"failure_count"`
+	RecentEvents  []agentOrganizationRecentEvent   `json:"recent_events"`
 	Current       *agentOrganizationActivityRecord `json:"current,omitempty"`
 	LastFailure   *agentOrganizationActivityRecord `json:"last_failure,omitempty"`
 	LastUpdatedAt *time.Time                       `json:"last_updated_at,omitempty"`
@@ -75,6 +77,15 @@ type agentOrganizationActivityRecord struct {
 	Role      string     `json:"role,omitempty"`
 	AgentID   string     `json:"agent_id,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+type agentOrganizationRecentEvent struct {
+	Source    string     `json:"source"`
+	AgentID   string     `json:"agent_id"`
+	Level     string     `json:"level,omitempty"`
+	Event     string     `json:"event,omitempty"`
+	Message   string     `json:"message"`
+	Timestamp *time.Time `json:"timestamp,omitempty"`
 }
 
 type agentOrganizationActivitySummary struct {
@@ -417,6 +428,7 @@ func buildAgentOrganizationSnapshot(ctx context.Context, cfg *config.Config) (ag
 		meetings:    meetings,
 	}
 	state.applyActivity()
+	state.applyRecentEvents(gatewayLogRecentEvents(state.agents))
 
 	snapshot := agentOrganizationSnapshot{
 		Roots:    buildAgentOrganizationRoots(cfg, state.agents),
@@ -452,6 +464,9 @@ func buildAgentOrganizationAgentMap(cfg *config.Config) map[string]*agentOrganiz
 			Group:     strings.TrimSpace(node.Group),
 			Workspace: organizationAgentWorkspace(cfg, configured),
 			Status:    agentOrganizationStatusIdle,
+			Activity: agentOrganizationAgentActivity{
+				RecentEvents: []agentOrganizationRecentEvent{},
+			},
 		}
 	}
 	return agents
@@ -600,6 +615,16 @@ func (s *agentOrganizationBuildState) applyActivity() {
 			s.summary.FailureCount++
 		}
 		s.applyMeetingRecord(rec)
+	}
+}
+
+func (s *agentOrganizationBuildState) applyRecentEvents(events map[string][]agentOrganizationRecentEvent) {
+	for agentID, agentEvents := range events {
+		agentState := s.agents[agentID]
+		if agentState == nil {
+			continue
+		}
+		agentState.Activity.RecentEvents = append([]agentOrganizationRecentEvent(nil), agentEvents...)
 	}
 }
 
@@ -831,4 +856,182 @@ func laterTime(current *time.Time, candidate time.Time) *time.Time {
 		return &candidate
 	}
 	return current
+}
+
+const (
+	agentOrganizationRecentEventLimit       = 10
+	agentOrganizationRecentEventMaxMessage  = 160
+	agentOrganizationRecentEventSource      = "gateway_log"
+	agentOrganizationRecentEventDefaultText = "gateway event"
+)
+
+var (
+	bearerAssignmentLogValuePattern = regexp.MustCompile(`(?i)authorization=Bearer\s+\S+`)
+	sensitiveAssignmentLogPattern   = regexp.MustCompile(`(?i)(authorization|token|api[_-]?key|secret|password)=\S+`)
+	bearerLogValuePattern           = regexp.MustCompile(`(?i)Bearer\s+\S+`)
+	openAIKeyLogValuePattern        = regexp.MustCompile(`sk-[A-Za-z0-9_-]+`)
+)
+
+func gatewayLogRecentEvents(
+	agents map[string]*agentOrganizationAgent,
+) map[string][]agentOrganizationRecentEvent {
+	if len(agents) == 0 || gateway.logs == nil {
+		return nil
+	}
+	lines, _, _ := gateway.logs.LinesSince(0)
+	if len(lines) == 0 {
+		return nil
+	}
+
+	events := make(map[string][]agentOrganizationRecentEvent)
+	for i := len(lines) - 1; i >= 0; i-- {
+		event, ok := parseGatewayLogRecentEvent(lines[i])
+		if !ok {
+			continue
+		}
+		for _, agentID := range matchingLogAgentIDs(event.fields, agents) {
+			if len(events[agentID]) >= agentOrganizationRecentEventLimit {
+				continue
+			}
+			agentEvent := event.toRecentEvent(agentID)
+			events[agentID] = append(events[agentID], agentEvent)
+		}
+	}
+	return events
+}
+
+type parsedGatewayLogEvent struct {
+	fields    map[string]any
+	level     string
+	event     string
+	message   string
+	timestamp *time.Time
+}
+
+func parseGatewayLogRecentEvent(line string) (parsedGatewayLogEvent, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return parsedGatewayLogEvent{}, false
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(line), &fields); err != nil || len(fields) == 0 {
+		return parsedGatewayLogEvent{}, false
+	}
+
+	message := firstStringLogField(fields, "message", "msg")
+	if message == "" {
+		message = firstStringLogField(fields, "event", "type")
+	}
+	if message == "" {
+		message = agentOrganizationRecentEventDefaultText
+	}
+
+	timestamp := parseGatewayLogTimestamp(firstStringLogField(fields, "time", "timestamp", "ts"))
+	return parsedGatewayLogEvent{
+		fields:    fields,
+		level:     firstStringLogField(fields, "level", "severity"),
+		event:     firstStringLogField(fields, "event"),
+		message:   sanitizeRecentEventMessage(message),
+		timestamp: timestamp,
+	}, true
+}
+
+func (e parsedGatewayLogEvent) toRecentEvent(agentID string) agentOrganizationRecentEvent {
+	return agentOrganizationRecentEvent{
+		Source:    agentOrganizationRecentEventSource,
+		AgentID:   agentID,
+		Level:     e.level,
+		Event:     e.event,
+		Message:   e.message,
+		Timestamp: e.timestamp,
+	}
+}
+
+func matchingLogAgentIDs(
+	fields map[string]any,
+	agents map[string]*agentOrganizationAgent,
+) []string {
+	constraints := []string{
+		"agent_id",
+		"target_agent_id",
+		"parent_agent_id",
+		"requester_id",
+		"sponsor_agent_id",
+		"chair_agent_id",
+		"child_agent_id",
+		"route_agent_id",
+		"scope_agent_id",
+	}
+	matches := make([]string, 0, 1)
+	seen := map[string]struct{}{}
+	for _, field := range constraints {
+		for _, agentID := range stringValuesFromLogField(fields[field]) {
+			agentID = strings.TrimSpace(agentID)
+			if agentID == "" || agents[agentID] == nil {
+				continue
+			}
+			if _, ok := seen[agentID]; ok {
+				continue
+			}
+			seen[agentID] = struct{}{}
+			matches = append(matches, agentID)
+		}
+	}
+	return matches
+}
+
+func firstStringLogField(fields map[string]any, keys ...string) string {
+	for _, key := range keys {
+		values := stringValuesFromLogField(fields[key])
+		if len(values) > 0 {
+			return strings.TrimSpace(values[0])
+		}
+	}
+	return ""
+}
+
+func stringValuesFromLogField(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		return []string{typed}
+	case []any:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				values = append(values, s)
+			}
+		}
+		return values
+	default:
+		return nil
+	}
+}
+
+func parseGatewayLogTimestamp(raw string) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return nil
+	}
+	parsed = parsed.UTC()
+	return &parsed
+}
+
+func sanitizeRecentEventMessage(message string) string {
+	message = strings.TrimSpace(message)
+	message = bearerAssignmentLogValuePattern.ReplaceAllString(message, "authorization=[redacted]")
+	message = sensitiveAssignmentLogPattern.ReplaceAllString(message, "$1=[redacted]")
+	message = bearerLogValuePattern.ReplaceAllString(message, "Bearer [redacted]")
+	message = openAIKeyLogValuePattern.ReplaceAllString(message, "[redacted]")
+	if len(message) <= agentOrganizationRecentEventMaxMessage {
+		return message
+	}
+	return strings.TrimSpace(message[:agentOrganizationRecentEventMaxMessage-3]) + "..."
 }

@@ -951,7 +951,7 @@ func parseGatewayLogRecentEvent(line string) (parsedGatewayLogEvent, bool) {
 
 	var fields map[string]any
 	if err := json.Unmarshal([]byte(line), &fields); err != nil || len(fields) == 0 {
-		return parsedGatewayLogEvent{}, false
+		return parseTextGatewayLogRecentEvent(line)
 	}
 
 	message := firstStringLogField(fields, "message", "msg")
@@ -972,6 +972,136 @@ func parseGatewayLogRecentEvent(line string) (parsedGatewayLogEvent, bool) {
 	}, true
 }
 
+func parseTextGatewayLogRecentEvent(line string) (parsedGatewayLogEvent, bool) {
+	fields, ok := parseGatewayLogKeyValues(line)
+	if !ok || len(matchingKnownLogAgentIDs(fields)) == 0 {
+		return parsedGatewayLogEvent{}, false
+	}
+
+	return parsedGatewayLogEvent{
+		fields:    fields,
+		level:     textGatewayLogLevel(fields, line),
+		event:     firstStringLogField(fields, "event", "type"),
+		message:   sanitizeRecentEventMessage(line),
+		timestamp: parseGatewayLogTimestamp(firstStringLogField(fields, "time", "timestamp", "ts")),
+	}, true
+}
+
+func parseGatewayLogKeyValues(line string) (map[string]any, bool) {
+	fields := map[string]any{}
+	for i := 0; i < len(line); {
+		for i < len(line) && line[i] <= ' ' {
+			i++
+		}
+		start := i
+		for i < len(line) && isGatewayLogKeyByte(line[i]) {
+			i++
+		}
+		if i == start || i >= len(line) || line[i] != '=' {
+			for i < len(line) && line[i] > ' ' {
+				i++
+			}
+			continue
+		}
+
+		key := line[start:i]
+		i++
+		if i >= len(line) {
+			fields[key] = ""
+			break
+		}
+
+		var value string
+		if line[i] == '"' {
+			parsed, next, ok := parseQuotedGatewayLogValue(line, i+1)
+			if !ok {
+				return nil, false
+			}
+			value = parsed
+			i = next
+		} else {
+			valueStart := i
+			for i < len(line) && line[i] > ' ' {
+				i++
+			}
+			value = line[valueStart:i]
+		}
+		fields[key] = value
+	}
+	return fields, len(fields) > 0
+}
+
+func parseQuotedGatewayLogValue(line string, start int) (string, int, bool) {
+	var value strings.Builder
+	escaped := false
+	for i := start; i < len(line); i++ {
+		ch := line[i]
+		if escaped {
+			value.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			next := i + 1
+			if next < len(line) && line[next] > ' ' {
+				return "", 0, false
+			}
+			return value.String(), next, true
+		}
+		value.WriteByte(ch)
+	}
+	return "", 0, false
+}
+
+func isGatewayLogKeyByte(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') ||
+		ch == '_' || ch == '-'
+}
+
+func textGatewayLogLevel(fields map[string]any, line string) string {
+	if level := firstStringLogField(fields, "level", "severity"); level != "" {
+		return normalizeGatewayLogLevel(level)
+	}
+	for _, token := range strings.Fields(line) {
+		switch strings.Trim(token, "[]") {
+		case "DBG", "DEBUG":
+			return "debug"
+		case "INF", "INFO":
+			return "info"
+		case "WRN", "WARN", "WARNING":
+			return "warn"
+		case "ERR", "ERROR":
+			return "error"
+		case "FTL", "FATAL":
+			return "fatal"
+		}
+	}
+	return ""
+}
+
+func normalizeGatewayLogLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "DBG", "DEBUG":
+		return "debug"
+	case "INF", "INFO":
+		return "info"
+	case "WRN", "WARN", "WARNING":
+		return "warn"
+	case "ERR", "ERROR":
+		return "error"
+	case "FTL", "FATAL":
+		return "fatal"
+	default:
+		return strings.TrimSpace(level)
+	}
+}
+
 func (e parsedGatewayLogEvent) toRecentEvent(agentID string) agentOrganizationRecentEvent {
 	return agentOrganizationRecentEvent{
 		Source:    agentOrganizationRecentEventSource,
@@ -987,20 +1117,9 @@ func matchingLogAgentIDs(
 	fields map[string]any,
 	agents map[string]*agentOrganizationAgent,
 ) []string {
-	constraints := []string{
-		"agent_id",
-		"target_agent_id",
-		"parent_agent_id",
-		"requester_id",
-		"sponsor_agent_id",
-		"chair_agent_id",
-		"child_agent_id",
-		"route_agent_id",
-		"scope_agent_id",
-	}
 	matches := make([]string, 0, 1)
 	seen := map[string]struct{}{}
-	for _, field := range constraints {
+	for _, field := range gatewayLogAgentReferenceFields {
 		for _, agentID := range stringValuesFromLogField(fields[field]) {
 			agentID = strings.TrimSpace(agentID)
 			if agentID == "" || agents[agentID] == nil {
@@ -1014,6 +1133,26 @@ func matchingLogAgentIDs(
 		}
 	}
 	return matches
+}
+
+func matchingKnownLogAgentIDs(fields map[string]any) []string {
+	matches := make([]string, 0, 1)
+	for _, field := range gatewayLogAgentReferenceFields {
+		matches = append(matches, stringValuesFromLogField(fields[field])...)
+	}
+	return matches
+}
+
+var gatewayLogAgentReferenceFields = []string{
+	"agent_id",
+	"target_agent_id",
+	"parent_agent_id",
+	"requester_id",
+	"sponsor_agent_id",
+	"chair_agent_id",
+	"child_agent_id",
+	"route_agent_id",
+	"scope_agent_id",
 }
 
 func firstStringLogField(fields map[string]any, keys ...string) string {

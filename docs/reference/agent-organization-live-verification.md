@@ -16,7 +16,8 @@ The organization page reads these launcher endpoints:
 These endpoints must not write config, delegation records, meeting records,
 memory, channel state, GitHub artifacts, Discord messages, or other external
 artifacts. They only read launcher config, local delegation and meeting record
-directories, and bounded gateway log lines for recent-event enrichment.
+directories, and bounded gateway log lines for best-effort recent-event
+enrichment.
 
 ## Refresh Behavior
 
@@ -52,8 +53,9 @@ records are retained separately through `last_failure` and error counters, so
 an old failure remains visible without permanently masking newer operational
 work.
 
-Recent gateway events can appear in the detail drawer, but they do not change
-badge status, counters, current activity, or structured-record selection.
+Recent gateway events can appear in the detail drawer as secondary evidence,
+but they do not change badge status, counters, current activity, or
+structured-record selection.
 
 ## Preparation
 
@@ -155,13 +157,16 @@ Restore the directories before resuming normal operation.
 ### 6. Recent-Event Enrichment
 
 Run a normal gateway turn or delegation that emits structured gateway log lines
-with `agent_id`, `target_agent_id`, `parent_agent_id`, `chair_agent_id`, or
+or launcher-captured text log lines with explicit agent key/value fields such
+as `agent_id`, `target_agent_id`, `parent_agent_id`, `chair_agent_id`, or
 `sponsor_agent_id`.
 
 Expected result:
 
 - Matching events appear under the selected agent's Recent Events tab.
 - Malformed or unrelated log lines are ignored.
+- Agent matches come only from explicit key/value fields, not arbitrary message
+  text or partial substrings.
 - Sensitive tokens and long messages are redacted or truncated.
 - Recent events do not change an otherwise `Idle`, `Working`, `Delegating`,
   `Meeting`, or `Failed` badge.

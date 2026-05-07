@@ -6,6 +6,7 @@
     "credentials": "Credentials",
     "agent_group": "Agent",
     "hub": "Hub",
+    "organization": "Organization",
     "skills": "Skills",
     "tools": "Tools",
     "services": "Services",
@@ -460,6 +461,48 @@
   "pages": {
     "agent": {
       "load_error": "Failed to load agent support information.",
+      "organization": {
+        "loading": "Loading organization",
+        "loading_detail": "Reading configured agents and current activity.",
+        "error": "Failed to load organization",
+        "error_detail": "The organization snapshot is unavailable.",
+        "empty": "No configured agents",
+        "empty_detail": "Add agents to the launcher configuration to populate this view.",
+        "active": "Active",
+        "delegations": "Delegations",
+        "meetings": "Meetings",
+        "mode": "Mode",
+        "hierarchy": "Hierarchy",
+        "flat": "Flat",
+        "inbox": "Inbox",
+        "outbox": "Outbox",
+        "errors": "Errors",
+        "no_activity": "No active records",
+        "idle_summary": "Idle",
+        "status": {
+          "idle": "Idle",
+          "working": "Working",
+          "delegating": "Delegating",
+          "meeting": "Meeting",
+          "failed": "Failed",
+          "requested": "Requested",
+          "running": "Running",
+          "completed": "Completed",
+          "cancelled": "Cancelled",
+          "started": "Started"
+        },
+        "activity_type": {
+          "delegation": "Delegation",
+          "meeting": "Meeting"
+        },
+        "role": {
+          "target": "Target",
+          "requester": "Requester",
+          "sponsor": "Sponsor",
+          "chair": "Chair",
+          "participant": "Participant"
+        }
+      },
       "skills": {
         "empty": "No skills are currently available.",
         "install_success": "Installed {{name}}.",

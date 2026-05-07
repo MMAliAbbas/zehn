@@ -6,6 +6,7 @@
     "credentials": "凭据",
     "agent_group": "智能体",
     "hub": "Hub",
+    "organization": "组织",
     "skills": "技能",
     "tools": "工具",
     "services": "服务",
@@ -460,6 +461,48 @@
   "pages": {
     "agent": {
       "load_error": "加载 Agent 支持信息失败。",
+      "organization": {
+        "loading": "正在加载组织",
+        "loading_detail": "正在读取已配置智能体和当前活动。",
+        "error": "加载组织失败",
+        "error_detail": "组织快照暂不可用。",
+        "empty": "没有已配置智能体",
+        "empty_detail": "将智能体添加到启动器配置后，此视图会显示内容。",
+        "active": "活动",
+        "delegations": "委派",
+        "meetings": "会议",
+        "mode": "模式",
+        "hierarchy": "层级",
+        "flat": "平铺",
+        "inbox": "收件箱",
+        "outbox": "发件箱",
+        "errors": "错误",
+        "no_activity": "没有活动记录",
+        "idle_summary": "空闲",
+        "status": {
+          "idle": "空闲",
+          "working": "工作中",
+          "delegating": "委派中",
+          "meeting": "会议中",
+          "failed": "失败",
+          "requested": "已请求",
+          "running": "运行中",
+          "completed": "已完成",
+          "cancelled": "已取消",
+          "started": "已开始"
+        },
+        "activity_type": {
+          "delegation": "委派",
+          "meeting": "会议"
+        },
+        "role": {
+          "target": "目标",
+          "requester": "请求方",
+          "sponsor": "发起方",
+          "chair": "主席",
+          "participant": "参与者"
+        }
+      },
       "skills": {
         "empty": "当前没有可用技能。",
         "install_success": "已安装 {{name}}。",

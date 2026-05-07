@@ -8,6 +8,7 @@ import {
   IconMessageCircle,
   IconSearch,
   IconSettings,
+  IconSitemap,
   IconSparkles,
   IconTools,
 } from "@tabler/icons-react"
@@ -136,6 +137,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             title: "navigation.hub",
             url: "/agent/hub",
             icon: IconSearch,
+            translateTitle: true,
+          },
+          {
+            title: "navigation.organization",
+            url: "/agent/organization",
+            icon: IconSitemap,
             translateTitle: true,
           },
           {

@@ -190,7 +190,7 @@ assert_scoped_changes() {
   for rel in ${changed[@]+"${changed[@]}"}; do
     [ -n "$rel" ] || continue
     ok=0
-    for item in "${allowed[@]}"; do
+    for item in ${allowed[@]+"${allowed[@]}"}; do
       item="${item%/}"
       case "$item" in
         */**)
@@ -234,7 +234,7 @@ assert_staged_changes_scoped() {
   for rel in ${staged[@]+"${staged[@]}"}; do
     [ -n "$rel" ] || continue
     ok=0
-    for item in "${allowed[@]}"; do
+    for item in ${allowed[@]+"${allowed[@]}"}; do
       item="${item%/}"
       case "$item" in
         */**)
@@ -415,7 +415,7 @@ commit_changes() {
     die "no allowed paths found for $TASK; refusing to auto-stage"
   fi
 
-  for item in "${allowed[@]}"; do
+  for item in ${allowed[@]+"${allowed[@]}"}; do
     item="${item%/}"
     if git -C "$ROOT" check-ignore -q -- "$item"; then
       log "skipping ignored allowed path during auto-stage: $item"

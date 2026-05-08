@@ -483,6 +483,11 @@
         "no_activity": "No active records",
         "idle_summary": "Idle",
         "role_label": "Role",
+        "workbench": {
+          "title": "Agent Workbench",
+          "empty": "Select an agent",
+          "empty_detail": "Choose a card in the organization canvas to inspect activity without leaving the hierarchy."
+        },
         "status": {
           "idle": "Idle",
           "working": "Working",

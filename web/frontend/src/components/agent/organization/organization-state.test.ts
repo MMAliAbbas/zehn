@@ -7,6 +7,7 @@ import {
   createOrganizationSelectionState,
   DEFAULT_WORKBENCH_SECTION,
   resolveActivityShortcut,
+  resolveSelectedOrganizationAgent,
   selectOrganizationAgent,
 } from "./organization-state.ts"
 import { AGENT_WORKBENCH_SECTIONS } from "./types.ts"
@@ -76,4 +77,64 @@ test("resolves error shortcuts to the failures workbench with recent events as t
     workbenchSection: "failures",
     detailTab: "recent",
   })
+})
+
+test("resolves a selected agent from snapshot agents before walking roots", () => {
+  const snapshot = {
+    agents: {
+      "li-engineering": {
+        id: "li-engineering",
+        label: "Engineering",
+        status: "working",
+        activity: {
+          inbox_count: 1,
+          outbox_count: 0,
+          meeting_count: 0,
+          failure_count: 0,
+        },
+      },
+    },
+    roots: [
+      {
+        id: "li-cto",
+        label: "CTO",
+        status: "idle",
+        activity: {
+          inbox_count: 0,
+          outbox_count: 0,
+          meeting_count: 0,
+          failure_count: 0,
+        },
+        children: [
+          {
+            id: "li-engineering",
+            label: "Engineering from tree",
+            status: "idle",
+            activity: {
+              inbox_count: 0,
+              outbox_count: 0,
+              meeting_count: 0,
+              failure_count: 0,
+            },
+          },
+        ],
+      },
+    ],
+    activity: {
+      delegation_count: 1,
+      meeting_count: 0,
+      failure_count: 0,
+      active_count: 1,
+    },
+    metadata: {
+      source: "test",
+      generated_at: "2026-05-09T00:00:00Z",
+      has_hierarchy: true,
+    },
+  }
+
+  assert.equal(
+    resolveSelectedOrganizationAgent(snapshot, "li-engineering")?.label,
+    "Engineering",
+  )
 })

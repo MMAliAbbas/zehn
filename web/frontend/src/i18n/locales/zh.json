@@ -483,6 +483,11 @@
         "no_activity": "没有活动记录",
         "idle_summary": "空闲",
         "role_label": "角色",
+        "workbench": {
+          "title": "智能体工作台",
+          "empty": "选择智能体",
+          "empty_detail": "在组织画布中选择卡片，即可在不离开层级视图的情况下查看活动。"
+        },
         "status": {
           "idle": "空闲",
           "working": "工作中",

@@ -6,7 +6,7 @@ import {
   IconInfoCircle,
   IconSend,
 } from "@tabler/icons-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -46,7 +46,14 @@ export function AgentCard({
     useState<AgentDetailTab>("overview")
   const displayName = displayAgentName(agent)
   const activity = summarizeActivity(agent.activity.current, t)
-  const selectAgent = () => onSelect(agent.id)
+  const desktopWorkbench = useDesktopWorkbenchLayout()
+  const selectAgent = () => {
+    onSelect(agent.id)
+    if (!desktopWorkbench) {
+      setDetailInitialTab("overview")
+      setDetailOpen(true)
+    }
+  }
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault()
@@ -84,7 +91,9 @@ export function AgentCard({
     const target = resolveActivityShortcut(shortcut)
     onSelect(agent.id, target.workbenchSection)
     setDetailInitialTab(target.detailTab)
-    setDetailOpen(true)
+    if (!desktopWorkbench) {
+      setDetailOpen(true)
+    }
   }
 
   return (
@@ -123,8 +132,11 @@ export function AgentCard({
               size="xs"
               onClick={(event) => {
                 event.stopPropagation()
+                onSelect(agent.id, "overview")
                 setDetailInitialTab("overview")
-                setDetailOpen(true)
+                if (!desktopWorkbench) {
+                  setDetailOpen(true)
+                }
               }}
               onKeyDown={(event) => event.stopPropagation()}
             >
@@ -179,4 +191,23 @@ export function AgentCard({
       />
     </>
   )
+}
+
+function useDesktopWorkbenchLayout() {
+  const [desktopWorkbench, setDesktopWorkbench] = useState(() =>
+    typeof window === "undefined"
+      ? false
+      : window.matchMedia("(min-width: 1024px)").matches,
+  )
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1024px)")
+    const updateLayout = () => setDesktopWorkbench(mediaQuery.matches)
+
+    updateLayout()
+    mediaQuery.addEventListener("change", updateLayout)
+    return () => mediaQuery.removeEventListener("change", updateLayout)
+  }, [])
+
+  return desktopWorkbench
 }

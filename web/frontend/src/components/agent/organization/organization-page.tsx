@@ -14,9 +14,11 @@ import { ORGANIZATION_REFRESH_INTERVAL_MS } from "./constants"
 import { buildOrderedRoots } from "./formatting"
 import {
   createOrganizationSelectionState,
+  resolveSelectedOrganizationAgent,
   selectOrganizationAgent,
 } from "./organization-state"
 import { OrganizationBranch } from "./organization-tree"
+import { AgentWorkbench } from "./agent-workbench"
 import { SnapshotSummary, StatePanel } from "./status-components"
 import type { AgentWorkbenchSection } from "./types"
 
@@ -33,12 +35,29 @@ export function OrganizationPage() {
     () => buildOrderedRoots(organizationQuery.data),
     [organizationQuery.data],
   )
+  const selectedAgent = useMemo(
+    () =>
+      resolveSelectedOrganizationAgent(
+        organizationQuery.data,
+        selection.selectedAgentID,
+      ),
+    [organizationQuery.data, selection.selectedAgentID],
+  )
 
   const handleSelectAgent = useCallback(
     (agentID: string, section?: AgentWorkbenchSection) => {
       setSelection((current) =>
         selectOrganizationAgent(current, agentID, section),
       )
+    },
+    [],
+  )
+  const handleWorkbenchSectionChange = useCallback(
+    (section: AgentWorkbenchSection) => {
+      setSelection((current) => ({
+        ...current,
+        workbenchSection: section,
+      }))
     },
     [],
   )
@@ -93,16 +112,23 @@ export function OrganizationPage() {
           ) : (
             <section className="space-y-4">
               <SnapshotSummary snapshot={organizationQuery.data} />
-              <div className="space-y-3">
-                {roots.map((node) => (
-                  <OrganizationBranch
-                    key={node.id}
-                    node={node}
-                    depth={0}
-                    selectedAgentID={selection.selectedAgentID}
-                    onSelectAgent={handleSelectAgent}
-                  />
-                ))}
+              <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)]">
+                <div className="min-w-0 space-y-3">
+                  {roots.map((node) => (
+                    <OrganizationBranch
+                      key={node.id}
+                      node={node}
+                      depth={0}
+                      selectedAgentID={selection.selectedAgentID}
+                      onSelectAgent={handleSelectAgent}
+                    />
+                  ))}
+                </div>
+                <AgentWorkbench
+                  agent={selectedAgent}
+                  activeSection={selection.workbenchSection}
+                  onSectionChange={handleWorkbenchSectionChange}
+                />
               </div>
             </section>
           )}

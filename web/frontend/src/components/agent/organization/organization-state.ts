@@ -1,4 +1,10 @@
 import type {
+  AgentOrganizationAgent,
+  AgentOrganizationNode,
+  AgentOrganizationSnapshot,
+} from "@/api/agents"
+
+import type {
   AgentActivityShortcut,
   AgentDetailTab,
   AgentWorkbenchSection,
@@ -42,4 +48,55 @@ export function resolveActivityShortcut(
     workbenchSection: shortcut,
     detailTab: shortcut,
   }
+}
+
+export function detailTabForWorkbenchSection(
+  section: AgentWorkbenchSection,
+): AgentDetailTab {
+  if (section === "failures" || section === "live-logs") {
+    return "recent"
+  }
+
+  return section
+}
+
+export function resolveSelectedOrganizationAgent(
+  snapshot: AgentOrganizationSnapshot | undefined,
+  selectedAgentID: string | null,
+): AgentOrganizationAgent | null {
+  if (!snapshot || !selectedAgentID) {
+    return null
+  }
+
+  const indexedAgent = snapshot.agents?.[selectedAgentID]
+  if (indexedAgent) {
+    return indexedAgent
+  }
+
+  for (const root of snapshot.roots ?? []) {
+    const match = findAgentInTree(root, selectedAgentID)
+    if (match) {
+      return match
+    }
+  }
+
+  return null
+}
+
+function findAgentInTree(
+  node: AgentOrganizationNode,
+  agentID: string,
+): AgentOrganizationAgent | null {
+  if (node.id === agentID) {
+    return node
+  }
+
+  for (const child of node.children ?? []) {
+    const match = findAgentInTree(child, agentID)
+    if (match) {
+      return match
+    }
+  }
+
+  return null
 }

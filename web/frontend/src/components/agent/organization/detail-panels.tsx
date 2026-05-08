@@ -9,7 +9,7 @@ import type {
   AgentOrganizationAgent,
   AgentOrganizationRecentEvent,
 } from "@/api/agents"
-import { getAgentInbox, getAgentMeetings } from "@/api/agents"
+import { getAgentFailures, getAgentInbox, getAgentMeetings } from "@/api/agents"
 import { LogsPanel } from "@/components/logs/logs-panel"
 import { Button } from "@/components/ui/button"
 import { useGatewayLogs } from "@/hooks/use-gateway-logs"
@@ -21,6 +21,7 @@ import {
 } from "@/lib/agent-log-filter"
 
 import {
+  buildFailureDrilldownRecords,
   compactActivityEvents,
   errorMessage,
   formatTimestamp,
@@ -430,19 +431,41 @@ function MeetingRecordItem({ record }: { record: AgentMeetingActivityRecord }) {
 
 export function FailureRecordsPanel({
   agent,
+  query,
 }: {
   agent: AgentOrganizationAgent
+  query: UseQueryResult<Awaited<ReturnType<typeof getAgentFailures>>, Error>
 }) {
   const { t } = useTranslation()
   const current = agent.activity.current
   const lastFailure = agent.activity.last_failure
-  const currentIsFailure = Boolean(
-    current && lastFailure && sameActivityRecord(current, lastFailure),
-  )
-  const records = compactActivityEvents(
-    currentIsFailure ? current : undefined,
+  const records = buildFailureDrilldownRecords(
+    current,
     lastFailure,
+    query.data?.records,
   )
+
+  if (query.isLoading && !query.data && records.length === 0) {
+    return (
+      <TabState
+        loading
+        title={t("pages.agent.organization.detail.loading", "Loading records")}
+      />
+    )
+  }
+
+  if (query.error && !query.data && records.length === 0) {
+    return (
+      <TabState
+        destructive
+        title={t(
+          "pages.agent.organization.detail.load_error",
+          "Failed to load records",
+        )}
+        detail={errorMessage(query.error)}
+      />
+    )
+  }
 
   if (records.length === 0) {
     return (
@@ -458,7 +481,26 @@ export function FailureRecordsPanel({
 
   return (
     <div className="space-y-2">
-      {!currentIsFailure && lastFailure ? (
+      {query.error && !query.data ? (
+        <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-xs">
+          {t("pages.agent.organization.detail.load_error", {
+            defaultValue: "Failed to load records: {{message}}",
+            message: errorMessage(query.error),
+          })}
+        </div>
+      ) : null}
+      {agent.activity.failure_count > records.length ? (
+        <div className="border-border/70 bg-muted/20 text-muted-foreground rounded-md border px-3 py-2 text-xs">
+          {t("pages.agent.organization.detail.failure_list_partial", {
+            defaultValue:
+              "Showing {{shown}} of {{total}} visible failure records.",
+            shown: records.length,
+            total: agent.activity.failure_count,
+          })}
+        </div>
+      ) : null}
+      {lastFailure &&
+      !records.some((record) => sameActivityRecord(record, lastFailure)) ? (
         <div className="border-border/70 bg-muted/20 text-muted-foreground rounded-md border px-3 py-2 text-xs">
           {current
             ? t("pages.agent.organization.detail.stale_failure_notice", {
@@ -475,7 +517,7 @@ export function FailureRecordsPanel({
       {records.map((record) => (
         <FailureRecordItem
           key={`${record.type}:${record.record_id}`}
-          current={currentIsFailure && sameActivityRecord(record, current)}
+          current={sameActivityRecord(record, current)}
           record={record}
         />
       ))}

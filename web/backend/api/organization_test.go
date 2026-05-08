@@ -275,6 +275,105 @@ func TestHandleAgentOrganization_LastFailureIncludesDrilldownMetadata(t *testing
 	}
 }
 
+func TestHandleGetAgentFailures_ReturnsRecentVisibleDelegationAndMeetingFailures(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+			{ID: "chair", Name: "Chair"},
+			{ID: "other", Name: "Other"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+
+	delegations := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	failedDelegation, err := delegations.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "private failed delegation must not leak",
+		ArtifactRefs:  []string{"github:issue/456"},
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+	if err := delegations.Failed(context.Background(), failedDelegation.DelegationID, errors.New("private delegation failure details")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+	failedDelegation.Status = agent.AgentDelegationStatusFailed
+	setDelegationCreatedAt(t, cfg, &failedDelegation, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	meetings := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	failedMeeting, err := meetings.Started(context.Background(), agent.AgentMeetingRequest{
+		Title:               "Risk Review",
+		SponsorAgentID:      "lead",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"worker"},
+		Goal:                "private failed meeting goal must not leak",
+		ArtifactRefs:        []string{"github:discussion/789"},
+	})
+	if err != nil {
+		t.Fatalf("Started() error = %v", err)
+	}
+	if err := meetings.Failed(context.Background(), failedMeeting.MeetingID, errors.New("private meeting failure details")); err != nil {
+		t.Fatalf("Failed(meeting) error = %v", err)
+	}
+	failedMeeting.Status = agent.AgentMeetingStatusFailed
+	setMeetingCreatedAt(t, cfg, &failedMeeting, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	hiddenMeeting, err := meetings.Started(context.Background(), agent.AgentMeetingRequest{
+		Title:               "Unrelated",
+		SponsorAgentID:      "lead",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"other"},
+		Goal:                "private unrelated meeting goal must not leak",
+	})
+	if err != nil {
+		t.Fatalf("Started(hidden) error = %v", err)
+	}
+	if err := meetings.Failed(context.Background(), hiddenMeeting.MeetingID, errors.New("private unrelated failure details")); err != nil {
+		t.Fatalf("Failed(hidden) error = %v", err)
+	}
+
+	httpRec := requestAgentActivity(t, configPath, "/api/agents/worker/failures")
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	body := httpRec.Body.String()
+	for _, private := range []string{
+		"private failed delegation",
+		"private delegation failure details",
+		"private failed meeting goal",
+		"private meeting failure details",
+		"private unrelated meeting goal",
+		"private unrelated failure details",
+	} {
+		if strings.Contains(body, private) {
+			t.Fatalf("response leaked private content %q: %s", private, body)
+		}
+	}
+
+	var resp agentActivityListResponse[agentOrganizationActivityRecord]
+	decodeJSONResponse(t, httpRec, &resp)
+	if resp.AgentID != "worker" || resp.Kind != "failures" {
+		t.Fatalf("response metadata = agent %q kind %q, want worker failures", resp.AgentID, resp.Kind)
+	}
+	if len(resp.Records) != 2 {
+		t.Fatalf("records = %+v, want two visible failures", resp.Records)
+	}
+	if resp.Records[0].Type != "meeting" || resp.Records[0].RecordID != failedMeeting.MeetingID || resp.Records[0].Role != "participant" || resp.Records[0].AgentID != "chair" {
+		t.Fatalf("records[0] = %+v, want newest failed meeting with chair peer", resp.Records[0])
+	}
+	if resp.Records[1].Type != "delegation" || resp.Records[1].RecordID != failedDelegation.DelegationID || resp.Records[1].Role != "target" || resp.Records[1].AgentID != "lead" {
+		t.Fatalf("records[1] = %+v, want older failed delegation with requester peer", resp.Records[1])
+	}
+	if got, want := strings.Join(resp.Records[0].ArtifactRefs, ","), "github:discussion/789"; got != want {
+		t.Fatalf("meeting artifact refs = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(resp.Records[1].ArtifactRefs, ","), "github:issue/456"; got != want {
+		t.Fatalf("delegation artifact refs = %q, want %q", got, want)
+	}
+}
+
 func TestHandleAgentOrganization_NewerFailureRemainsCurrentWithoutNewerActiveRecord(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{
@@ -713,14 +812,7 @@ func loadOrganizationAPIConfig(t *testing.T, configPath string) *config.Config {
 func requestAgentOrganization(t *testing.T, configPath string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	h := NewHandler(configPath)
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/organization", nil)
-	mux.ServeHTTP(rec, req)
-	return rec
+	return requestAgentActivity(t, configPath, "/api/agents/organization")
 }
 
 func withIsolatedGatewayLogs(t *testing.T) {

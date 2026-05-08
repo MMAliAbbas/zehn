@@ -87,6 +87,35 @@ export function compactActivityEvents(
   })
 }
 
+export function buildFailureDrilldownRecords(
+  current: AgentOrganizationActivityRecord | undefined,
+  lastFailure: AgentOrganizationActivityRecord | undefined,
+  recentFailures: AgentOrganizationActivityRecord[] | undefined,
+) {
+  if (recentFailures) {
+    return dedupeActivityRecords(recentFailures)
+  }
+  const currentIsLastFailure =
+    current?.type === lastFailure?.type &&
+    current?.record_id === lastFailure?.record_id
+  return compactActivityEvents(
+    currentIsLastFailure ? current : undefined,
+    lastFailure,
+  )
+}
+
+function dedupeActivityRecords(records: AgentOrganizationActivityRecord[]) {
+  const seen = new Set<string>()
+  return records.filter((record) => {
+    const key = `${record.type}:${record.record_id}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
 export function formatTimestamp(value: string | undefined, t: TFunction) {
   if (!value) {
     return t("common.notAvailable", "Unavailable")

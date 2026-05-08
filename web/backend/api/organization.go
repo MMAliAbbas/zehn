@@ -159,6 +159,7 @@ func (h *Handler) registerAgentOrganizationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/{id}/inbox", h.handleGetAgentInbox)
 	mux.HandleFunc("GET /api/agents/{id}/outbox", h.handleGetAgentOutbox)
 	mux.HandleFunc("GET /api/agents/{id}/meetings", h.handleGetAgentMeetings)
+	mux.HandleFunc("GET /api/agents/{id}/failures", h.handleGetAgentFailures)
 }
 
 // handleGetAgentOrganization returns a normalized configured agent hierarchy plus structured activity.
@@ -302,6 +303,58 @@ func (h *Handler) handleGetAgentMeetings(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (h *Handler) handleGetAgentFailures(w http.ResponseWriter, r *http.Request) {
+	cfg, agentID, limit, ok := h.loadAgentActivityRequest(w, r)
+	if !ok {
+		return
+	}
+
+	delegations, err := agent.NewDelegationRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "delegations"),
+		nil,
+	).List(r.Context(), agent.AgentDelegationRecordQuery{IncludePrivateAll: true})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load agent failures: %v", err), http.StatusInternalServerError)
+		return
+	}
+	meetings, err := agent.NewMeetingRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "meetings"),
+		nil,
+	).List(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load agent failures: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	records := make([]agentOrganizationActivityRecord, 0)
+	for _, rec := range delegations {
+		if rec.Status != agent.AgentDelegationStatusFailed {
+			continue
+		}
+		role := delegationRoleForAgent(rec, agentID)
+		if role != "target" && role != "requester" {
+			continue
+		}
+		records = append(records, summarizeDelegationFailureActivity(rec, agentID, role))
+	}
+	for _, rec := range meetings {
+		if rec.Status != agent.AgentMeetingStatusFailed {
+			continue
+		}
+		if _, ok := meetingParticipantIDs(rec)[agentID]; !ok {
+			continue
+		}
+		records = append(records, summarizeMeetingFailureActivity(rec, agentID))
+	}
+
+	writeAgentActivityResponse(w, agentActivityListResponse[agentOrganizationActivityRecord]{
+		AgentID: agentID,
+		Kind:    "failures",
+		Limit:   limit,
+		Records: newestActivityRecords(records, limit),
+	})
+}
+
 func (h *Handler) loadAgentActivityRequest(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -373,6 +426,26 @@ func newestMeetingRecords(records []agent.AgentMeetingRecord, limit int) []agent
 	return records
 }
 
+func newestActivityRecords(records []agentOrganizationActivityRecord, limit int) []agentOrganizationActivityRecord {
+	records = append([]agentOrganizationActivityRecord(nil), records...)
+	slices.SortFunc(records, func(a, b agentOrganizationActivityRecord) int {
+		if byUpdated := cmp.Compare(activityRecordUnixNano(b), activityRecordUnixNano(a)); byUpdated != 0 {
+			return byUpdated
+		}
+		if byCreated := cmp.Compare(activityRecordCreatedUnixNano(b), activityRecordCreatedUnixNano(a)); byCreated != 0 {
+			return byCreated
+		}
+		if byType := cmp.Compare(a.Type, b.Type); byType != 0 {
+			return byType
+		}
+		return cmp.Compare(a.RecordID, b.RecordID)
+	})
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	return records
+}
+
 func summarizeDelegationActivity(
 	rec agent.AgentDelegationRecord,
 	agentID string,
@@ -396,6 +469,29 @@ func summarizeDelegationActivity(
 		StartedAt:     rec.StartedAt,
 		CompletedAt:   rec.CompletedAt,
 	}
+}
+
+func summarizeDelegationFailureActivity(
+	rec agent.AgentDelegationRecord,
+	agentID string,
+	role string,
+) agentOrganizationActivityRecord {
+	activity := organizationRecordActivity(
+		"delegation",
+		rec.DelegationID,
+		string(rec.Status),
+		rec.CreatedAt,
+		rec.UpdatedAt,
+		rec.CompletedAt,
+		rec.Request.ArtifactRefs,
+	)
+	activity.Role = role
+	if role == "target" {
+		activity.AgentID = delegationRequesterID(rec)
+	} else {
+		activity.AgentID = strings.TrimSpace(rec.TargetAgentID)
+	}
+	return activity
 }
 
 func delegationRoleForAgent(rec agent.AgentDelegationRecord, agentID string) string {
@@ -424,6 +520,26 @@ func summarizeMeetingActivity(rec agent.AgentMeetingRecord, agentID string) agen
 		UpdatedAt:      rec.UpdatedAt,
 		CompletedAt:    rec.CompletedAt,
 	}
+}
+
+func summarizeMeetingFailureActivity(rec agent.AgentMeetingRecord, agentID string) agentOrganizationActivityRecord {
+	activity := organizationRecordActivity(
+		"meeting",
+		rec.MeetingID,
+		string(rec.Status),
+		rec.CreatedAt,
+		rec.UpdatedAt,
+		rec.CompletedAt,
+		rec.ArtifactRefs,
+	)
+	activity.Role = meetingParticipantIDs(rec)[agentID]
+	switch activity.Role {
+	case "chair":
+		activity.AgentID = strings.TrimSpace(rec.SponsorAgentID)
+	default:
+		activity.AgentID = strings.TrimSpace(rec.ChairAgentID)
+	}
+	return activity
 }
 
 func writeAgentActivityResponse[T any](w http.ResponseWriter, resp agentActivityListResponse[T]) {
@@ -940,6 +1056,13 @@ func activityRecordUnixNano(record agentOrganizationActivityRecord) int64 {
 		return 0
 	}
 	return record.UpdatedAt.UnixNano()
+}
+
+func activityRecordCreatedUnixNano(record agentOrganizationActivityRecord) int64 {
+	if record.CreatedAt == nil {
+		return 0
+	}
+	return record.CreatedAt.UnixNano()
 }
 
 const (

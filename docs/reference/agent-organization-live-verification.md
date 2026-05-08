@@ -12,6 +12,7 @@ The organization page reads these launcher endpoints:
 - `GET /api/agents/{id}/inbox`
 - `GET /api/agents/{id}/outbox`
 - `GET /api/agents/{id}/meetings`
+- `GET /api/agents/{id}/failures`
 
 These endpoints must not write config, delegation records, meeting records,
 memory, channel state, GitHub artifacts, Discord messages, or other external
@@ -24,9 +25,10 @@ enrichment.
 The Agent > Organization page is a near-live operational dashboard based on
 conservative polling, not a guaranteed realtime event stream. While the page is
 mounted, the organization snapshot refreshes every 15 seconds. When an agent
-detail drawer is open, the inbox, outbox, and meetings drill-downs also refresh
-every 15 seconds, but only for the currently visible tab. Closed drawers and
-hidden drill-down tabs do not continue polling their activity endpoints.
+detail drawer is open, the inbox, outbox, meetings, and failures drill-downs
+also refresh every 15 seconds, but only for the currently visible tab. Closed
+drawers and hidden drill-down tabs do not continue polling their activity
+endpoints.
 
 Background refreshes keep the last visible content on screen. Initial loading
 and full-page error states are reserved for the first request before any usable
@@ -51,9 +53,9 @@ The Details button always opens Overview. Count pills act as shortcuts:
 - Errors opens the Failures workbench tab or detail tab.
 
 The workbench tabs are Overview, Inbox, Outbox, Meetings, Failures, Recent
-Events, and Live Logs. Inbox, Outbox, and Meetings poll only while their tab is
-visible. Overview, Failures, Recent Events, and Live Logs use the already-loaded
-organization snapshot or the shared gateway log polling state.
+Events, and Live Logs. Inbox, Outbox, Meetings, and Failures poll only while
+their tab is visible. Overview, Recent Events, and Live Logs use the
+already-loaded organization snapshot or the shared gateway log polling state.
 
 The command header summarizes the organization snapshot: active work,
 delegations, meetings, failures, hierarchy or flat mode, generated time,
@@ -80,11 +82,14 @@ fields, including `agent_id`, `target_agent_id`,
 text, partial substrings, tokens, and sensitive-looking fields must not count
 as selected-agent references.
 
-The Failures tab shows the current failure when it is the newest relevant
-structured record. If newer activity exists, the tab labels the last failure as
-historical and keeps the newer current activity visible in Overview and Recent
-Events. Failure drilldown is limited to record type, record id, peer agent,
-role, status, created, updated, completed, and artifact references.
+The Failures tab fetches the selected agent's recent visible failed delegation
+and meeting records. The current and last-failure summaries remain fallback
+context while records are loading or unavailable, but the fetched recent failure
+list is authoritative once loaded. If newer activity exists, the tab labels
+older failures as historical and keeps the newer current activity visible in
+Overview and Recent Events. Failure drilldown is limited to record type, record
+id, peer agent, role, status, created, updated, completed, and artifact
+references.
 
 ## Badge Meanings
 
@@ -142,6 +147,7 @@ curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/activity"
 curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/inbox"
 curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/outbox"
 curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/meetings"
+curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/failures"
 ```
 
 Expected result:
@@ -212,6 +218,8 @@ Expected result:
   exists.
 - Failed delegation and failed meeting records appear as failure entries in the
   Recent Activity feed and open the Failures tab.
+- The Failures tab lists recent visible failed delegation and meeting records
+  when more than one failure contributes to the selected agent's error count.
 - Failure details are redacted to record status and identifiers; private error
   strings do not appear in launcher responses.
 

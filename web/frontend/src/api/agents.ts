@@ -168,6 +168,15 @@ export async function getAgentMeetings(
   )
 }
 
+export async function getAgentFailures(
+  agentID: string,
+  limit?: number,
+): Promise<AgentActivityListResponse<AgentOrganizationActivityRecord>> {
+  return request<AgentActivityListResponse<AgentOrganizationActivityRecord>>(
+    agentActivityPath(agentID, "failures", limit),
+  )
+}
+
 function agentActivityPath(agentID: string, kind: string, limit?: number) {
   const path = `/api/agents/${encodeURIComponent(agentID)}/${kind}`
   if (!limit) {

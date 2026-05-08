@@ -3,7 +3,12 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { AgentOrganizationAgent } from "@/api/agents"
-import { getAgentInbox, getAgentMeetings, getAgentOutbox } from "@/api/agents"
+import {
+  getAgentFailures,
+  getAgentInbox,
+  getAgentMeetings,
+  getAgentOutbox,
+} from "@/api/agents"
 import { Button } from "@/components/ui/button"
 
 import {
@@ -62,6 +67,15 @@ export function AgentDetailContent({
         ? AGENT_DETAIL_REFRESH_INTERVAL_MS
         : false,
   })
+  const failuresQuery = useQuery({
+    queryKey: ["agents", agent.id, "failures", AGENT_DETAIL_LIMIT],
+    queryFn: () => getAgentFailures(agent.id, AGENT_DETAIL_LIMIT),
+    enabled: enabled && activeTab === "failures",
+    refetchInterval:
+      enabled && activeTab === "failures"
+        ? AGENT_DETAIL_REFRESH_INTERVAL_MS
+        : false,
+  })
 
   const tabs = agentDetailTabs(agent, t)
 
@@ -115,7 +129,7 @@ export function AgentDetailContent({
         ) : activeTab === "meetings" ? (
           <MeetingRecordsPanel query={meetingsQuery} />
         ) : activeTab === "failures" ? (
-          <FailureRecordsPanel agent={agent} />
+          <FailureRecordsPanel agent={agent} query={failuresQuery} />
         ) : activeTab === "live-logs" ? (
           <LiveLogsPanel agent={agent} />
         ) : (

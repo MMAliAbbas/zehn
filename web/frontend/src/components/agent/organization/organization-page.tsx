@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next"
 import { getAgentOrganization } from "@/api/agents"
 import { PageHeader } from "@/components/page-header"
 
+import { AgentWorkbench } from "./agent-workbench"
 import { ORGANIZATION_REFRESH_INTERVAL_MS } from "./constants"
 import { buildOrderedRoots } from "./formatting"
 import {
@@ -18,10 +19,9 @@ import {
   selectOrganizationAgent,
 } from "./organization-state"
 import { OrganizationBranch } from "./organization-tree"
-import { AgentWorkbench } from "./agent-workbench"
 import {
   OrganizationActivityFeed,
-  SnapshotSummary,
+  OrganizationCommandHeader,
   StatePanel,
 } from "./status-components"
 import type { AgentWorkbenchSection } from "./types"
@@ -115,7 +115,12 @@ export function OrganizationPage() {
             />
           ) : (
             <section className="space-y-4">
-              <SnapshotSummary snapshot={organizationQuery.data} />
+              <OrganizationCommandHeader
+                snapshot={organizationQuery.data}
+                isFetching={organizationQuery.isFetching}
+                isError={organizationQuery.isError}
+                dataUpdatedAt={organizationQuery.dataUpdatedAt}
+              />
               <OrganizationActivityFeed
                 snapshot={organizationQuery.data}
                 onSelectAgent={handleSelectAgent}

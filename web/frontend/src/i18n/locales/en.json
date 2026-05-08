@@ -483,6 +483,16 @@
         "no_activity": "No active records",
         "idle_summary": "Idle",
         "role_label": "Role",
+        "command_header": {
+          "active_work": "Active Work",
+          "generated": "Generated",
+          "refreshed": "Refreshed",
+          "query": "Query",
+          "loading": "Loading",
+          "refreshing": "Refreshing",
+          "stale": "Stale",
+          "live": "Live"
+        },
         "workbench": {
           "title": "Agent Workbench",
           "empty": "Select an agent",

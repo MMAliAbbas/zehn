@@ -483,6 +483,16 @@
         "no_activity": "没有活动记录",
         "idle_summary": "空闲",
         "role_label": "角色",
+        "command_header": {
+          "active_work": "活动工作",
+          "generated": "生成时间",
+          "refreshed": "刷新时间",
+          "query": "查询",
+          "loading": "加载中",
+          "refreshing": "刷新中",
+          "stale": "已过期",
+          "live": "实时"
+        },
         "workbench": {
           "title": "智能体工作台",
           "empty": "选择智能体",

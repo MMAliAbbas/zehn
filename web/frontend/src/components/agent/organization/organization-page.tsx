@@ -19,7 +19,11 @@ import {
 } from "./organization-state"
 import { OrganizationBranch } from "./organization-tree"
 import { AgentWorkbench } from "./agent-workbench"
-import { SnapshotSummary, StatePanel } from "./status-components"
+import {
+  OrganizationActivityFeed,
+  SnapshotSummary,
+  StatePanel,
+} from "./status-components"
 import type { AgentWorkbenchSection } from "./types"
 
 export function OrganizationPage() {
@@ -112,6 +116,10 @@ export function OrganizationPage() {
           ) : (
             <section className="space-y-4">
               <SnapshotSummary snapshot={organizationQuery.data} />
+              <OrganizationActivityFeed
+                snapshot={organizationQuery.data}
+                onSelectAgent={handleSelectAgent}
+              />
               <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)]">
                 <div className="min-w-0 space-y-3">
                   {roots.map((node) => (

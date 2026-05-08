@@ -503,7 +503,14 @@
         },
         "activity_type": {
           "delegation": "委派",
-          "meeting": "会议"
+          "meeting": "会议",
+          "failure": "失败",
+          "event": "事件"
+        },
+        "feed": {
+          "title": "近期活动",
+          "empty": "没有近期活动记录",
+          "org_scope": "组织"
         },
         "role": {
           "target": "目标",

@@ -343,6 +343,99 @@ func TestHandleAgentOrganization_RecentEventsIncludeMatchingStructuredGatewayLog
 	}
 }
 
+func TestHandleAgentOrganization_ActivityFeedSummarizesRecentOrgEvents(t *testing.T) {
+	withIsolatedGatewayLogs(t)
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+			{ID: "chair", Name: "Chair"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+
+	delegations := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	failed, err := delegations.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "private failure prompt must not leak",
+	})
+	if err != nil {
+		t.Fatalf("Requested(failed) error = %v", err)
+	}
+	if err := delegations.Failed(context.Background(), failed.DelegationID, errors.New("private failure details")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+	failed.Status = agent.AgentDelegationStatusFailed
+	setDelegationCreatedAt(t, cfg, &failed, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	running, err := delegations.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "private running prompt must not leak",
+	})
+	if err != nil {
+		t.Fatalf("Requested(running) error = %v", err)
+	}
+	if err := delegations.Running(context.Background(), running.DelegationID); err != nil {
+		t.Fatalf("Running() error = %v", err)
+	}
+	running.Status = agent.AgentDelegationStatusRunning
+	setDelegationCreatedAt(t, cfg, &running, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	meetings := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	meeting := writeMeetingRecord(t, meetings, agent.AgentMeetingRequest{
+		Title:               "Quarter plan",
+		SponsorAgentID:      "lead",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"worker"},
+		Goal:                "private meeting goal must not leak",
+	})
+	setMeetingCreatedAt(t, cfg, &meeting, time.Date(2026, 5, 7, 11, 0, 0, 0, time.UTC))
+
+	gateway.logs.Append(`{"level":"info","time":"2026-05-07T12:00:00Z","agent_id":"worker","event":"turn_finished","message":"turn finished"}`)
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	body := httpRec.Body.String()
+	for _, private := range []string{"private failure prompt", "private running prompt", "private meeting goal", "private failure details"} {
+		if strings.Contains(body, private) {
+			t.Fatalf("response leaked private content %q: %s", private, body)
+		}
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	if len(resp.Activity.Recent) != 4 {
+		t.Fatalf("recent feed = %+v, want four entries", resp.Activity.Recent)
+	}
+
+	wantTypes := []string{"event", "meeting", "delegation", "failure"}
+	wantAgents := []string{"worker", "chair", "worker", "worker"}
+	for i, entry := range resp.Activity.Recent {
+		if entry.Type != wantTypes[i] || entry.AgentID != wantAgents[i] {
+			t.Fatalf("recent[%d] = %+v, want type %q agent %q", i, entry, wantTypes[i], wantAgents[i])
+		}
+		if entry.Status == "" {
+			t.Fatalf("recent[%d] missing status: %+v", i, entry)
+		}
+		if entry.Timestamp == nil {
+			t.Fatalf("recent[%d] missing timestamp: %+v", i, entry)
+		}
+	}
+	if resp.Activity.Recent[1].RecordID != meeting.MeetingID {
+		t.Fatalf("meeting record id = %q, want %q", resp.Activity.Recent[1].RecordID, meeting.MeetingID)
+	}
+	if resp.Activity.Recent[2].RecordID != running.DelegationID {
+		t.Fatalf("running delegation id = %q, want %q", resp.Activity.Recent[2].RecordID, running.DelegationID)
+	}
+	if resp.Activity.Recent[3].RecordID != failed.DelegationID {
+		t.Fatalf("failed delegation id = %q, want %q", resp.Activity.Recent[3].RecordID, failed.DelegationID)
+	}
+}
+
 func TestHandleAgentOrganization_RecentEventsIgnoreUnrelatedAndMalformedLogs(t *testing.T) {
 	withIsolatedGatewayLogs(t)
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
@@ -552,4 +645,24 @@ func agentNodeIDs(nodes []agentOrganizationNode) []string {
 		ids = append(ids, node.ID)
 	}
 	return ids
+}
+
+func setMeetingCreatedAt(
+	t *testing.T,
+	cfg *config.Config,
+	rec *agent.AgentMeetingRecord,
+	createdAt time.Time,
+) {
+	t.Helper()
+
+	rec.CreatedAt = createdAt
+	rec.UpdatedAt = createdAt
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	path := filepath.Join(cfg.WorkspacePath(), "meetings", rec.MeetingID+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
 }

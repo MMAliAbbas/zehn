@@ -56,6 +56,16 @@ export interface AgentOrganizationActivitySummary {
   meeting_count: number
   failure_count: number
   active_count: number
+  recent?: AgentOrganizationActivityFeed[]
+}
+
+export interface AgentOrganizationActivityFeed {
+  type: string
+  agent_id?: string
+  record_id?: string
+  status?: string
+  summary?: string
+  timestamp?: string
 }
 
 export interface AgentOrganizationSnapshotMetadata {

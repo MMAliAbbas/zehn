@@ -503,7 +503,14 @@
         },
         "activity_type": {
           "delegation": "Delegation",
-          "meeting": "Meeting"
+          "meeting": "Meeting",
+          "failure": "Failure",
+          "event": "Event"
+        },
+        "feed": {
+          "title": "Recent Activity",
+          "empty": "No recent activity records",
+          "org_scope": "Organization"
         },
         "role": {
           "target": "Target",

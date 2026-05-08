@@ -1,13 +1,24 @@
-import { IconCircleCheck } from "@tabler/icons-react"
+import {
+  IconActivity,
+  IconAlertTriangle,
+  IconCalendarEvent,
+  IconCircleCheck,
+  IconClipboardList,
+  IconTerminal2,
+} from "@tabler/icons-react"
 import type { ComponentType, MouseEventHandler, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
-import type { AgentOrganizationSnapshot } from "@/api/agents"
+import type {
+  AgentOrganizationActivityFeed,
+  AgentOrganizationSnapshot,
+} from "@/api/agents"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-import { isProblemStatus } from "./formatting"
+import { displayAgentName, formatTimestamp, isProblemStatus } from "./formatting"
+import type { AgentWorkbenchSection } from "./types"
 
 export function SnapshotSummary({
   snapshot,
@@ -159,6 +170,157 @@ export function StatePanel({
       </div>
     </div>
   )
+}
+
+export function OrganizationActivityFeed({
+  snapshot,
+  onSelectAgent,
+}: {
+  snapshot: AgentOrganizationSnapshot | undefined
+  onSelectAgent: (agentID: string, section?: AgentWorkbenchSection) => void
+}) {
+  const { t } = useTranslation()
+  const entries = snapshot?.activity?.recent ?? []
+  const agents = snapshot?.agents ?? {}
+
+  return (
+    <section className="border-border/70 bg-card rounded-lg border px-4 py-3 shadow-xs">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <IconActivity className="text-muted-foreground size-4 shrink-0" />
+          <h2 className="truncate text-sm font-medium">
+            {t("pages.agent.organization.feed.title", "Recent Activity")}
+          </h2>
+        </div>
+        <Badge variant="outline" className="rounded-md">
+          {entries.length}
+        </Badge>
+      </div>
+      {entries.length === 0 ? (
+        <EmptyActivityLine
+          label={t(
+            "pages.agent.organization.feed.empty",
+            "No recent activity records",
+          )}
+        />
+      ) : (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {entries.slice(0, 8).map((entry, index) => (
+            <ActivityFeedEntry
+              key={`${entry.type}:${entry.record_id ?? entry.agent_id ?? index}:${entry.timestamp ?? index}`}
+              entry={entry}
+              agentLabel={
+                entry.agent_id && agents[entry.agent_id]
+                  ? displayAgentName(agents[entry.agent_id])
+                  : entry.agent_id
+              }
+              onSelectAgent={
+                entry.agent_id && agents[entry.agent_id]
+                  ? () =>
+                      onSelectAgent(
+                        entry.agent_id as string,
+                        activityFeedSection(entry),
+                      )
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ActivityFeedEntry({
+  entry,
+  agentLabel,
+  onSelectAgent,
+}: {
+  entry: AgentOrganizationActivityFeed
+  agentLabel?: string
+  onSelectAgent?: () => void
+}) {
+  const { t } = useTranslation()
+  const content = (
+    <>
+      <div className="flex min-w-0 items-center gap-2">
+        {activityFeedIcon(entry.type)}
+        <span className="truncate text-xs font-medium">
+          {agentLabel ??
+            t("pages.agent.organization.feed.org_scope", "Organization")}
+        </span>
+        {entry.status ? (
+          <Badge
+            variant={isProblemStatus(entry.status) ? "destructive" : "outline"}
+            className="max-w-24 shrink-0 truncate rounded-md capitalize"
+          >
+            {t(`pages.agent.organization.status.${entry.status}`, entry.status)}
+          </Badge>
+        ) : null}
+      </div>
+      <div className="mt-1 truncate text-xs">
+        {t(
+          `pages.agent.organization.activity_type.${entry.type}`,
+          entry.type,
+        )}
+        {entry.summary ? ` / ${entry.summary}` : ""}
+      </div>
+      <div className="text-muted-foreground mt-1 truncate text-xs">
+        {formatTimestamp(entry.timestamp, t)}
+      </div>
+    </>
+  )
+
+  if (onSelectAgent) {
+    return (
+      <button
+        type="button"
+        className="border-border/70 bg-background hover:bg-muted/60 focus-visible:ring-ring/50 min-w-0 rounded-md border px-3 py-2 text-left text-sm transition focus-visible:ring-2 focus-visible:outline-hidden"
+        onClick={onSelectAgent}
+      >
+        {content}
+      </button>
+    )
+  }
+
+  return (
+    <div className="border-border/70 bg-background min-w-0 rounded-md border px-3 py-2 text-sm">
+      {content}
+    </div>
+  )
+}
+
+function activityFeedIcon(type: string) {
+  const className = "text-muted-foreground size-3.5 shrink-0"
+  switch (type) {
+    case "delegation":
+      return <IconClipboardList className={className} />
+    case "meeting":
+      return <IconCalendarEvent className={className} />
+    case "failure":
+      return <IconAlertTriangle className={className} />
+    case "event":
+      return <IconTerminal2 className={className} />
+    default:
+      return <IconActivity className={className} />
+  }
+}
+
+function activityFeedSection(
+  entry: AgentOrganizationActivityFeed,
+): AgentWorkbenchSection {
+  switch (entry.type) {
+    case "delegation":
+      return "inbox"
+    case "meeting":
+      return "meetings"
+    case "failure":
+      return "failures"
+    case "event":
+      return "recent"
+    default:
+      return "overview"
+  }
 }
 
 export function EmptyActivityLine({ label }: { label: string }) {

@@ -89,10 +89,20 @@ type agentOrganizationRecentEvent struct {
 }
 
 type agentOrganizationActivitySummary struct {
-	DelegationCount int `json:"delegation_count"`
-	MeetingCount    int `json:"meeting_count"`
-	FailureCount    int `json:"failure_count"`
-	ActiveCount     int `json:"active_count"`
+	DelegationCount int                             `json:"delegation_count"`
+	MeetingCount    int                             `json:"meeting_count"`
+	FailureCount    int                             `json:"failure_count"`
+	ActiveCount     int                             `json:"active_count"`
+	Recent          []agentOrganizationActivityFeed `json:"recent"`
+}
+
+type agentOrganizationActivityFeed struct {
+	Type      string     `json:"type"`
+	AgentID   string     `json:"agent_id,omitempty"`
+	RecordID  string     `json:"record_id,omitempty"`
+	Status    string     `json:"status,omitempty"`
+	Summary   string     `json:"summary,omitempty"`
+	Timestamp *time.Time `json:"timestamp,omitempty"`
 }
 
 type agentActivityListResponse[T any] struct {
@@ -452,7 +462,9 @@ func buildAgentOrganizationSnapshot(ctx context.Context, cfg *config.Config) (ag
 		meetings:    meetings,
 	}
 	state.applyActivity()
-	state.applyRecentEvents(gatewayLogRecentEvents(state.agents))
+	recentEvents := gatewayLogRecentEvents(state.agents)
+	state.applyRecentEvents(recentEvents)
+	state.summary.Recent = state.recentActivityFeed(recentEvents)
 
 	snapshot := agentOrganizationSnapshot{
 		Roots:    buildAgentOrganizationRoots(cfg, state.agents),
@@ -469,6 +481,9 @@ func buildAgentOrganizationSnapshot(ctx context.Context, cfg *config.Config) (ag
 	}
 	if snapshot.Agents == nil {
 		snapshot.Agents = map[string]agentOrganizationAgent{}
+	}
+	if snapshot.Activity.Recent == nil {
+		snapshot.Activity.Recent = []agentOrganizationActivityFeed{}
 	}
 	return snapshot, nil
 }
@@ -673,6 +688,97 @@ func (s *agentOrganizationBuildState) applyDelegationRecord(rec agent.AgentDeleg
 		roleActivity.AgentID = targetID
 		applyAgentOrganizationStatus(requester, roleActivity, delegationRecordPriority(rec.Status, "requester"))
 	}
+}
+
+const agentOrganizationActivityFeedLimit = 20
+
+func (s *agentOrganizationBuildState) recentActivityFeed(
+	recentEvents map[string][]agentOrganizationRecentEvent,
+) []agentOrganizationActivityFeed {
+	feed := make([]agentOrganizationActivityFeed, 0, len(s.delegations)+len(s.meetings))
+	for _, rec := range s.delegations {
+		entryType := "delegation"
+		if rec.Status == agent.AgentDelegationStatusFailed {
+			entryType = "failure"
+		}
+		feed = append(feed, agentOrganizationActivityFeed{
+			Type:      entryType,
+			AgentID:   firstNonEmpty(rec.TargetAgentID, delegationRequesterID(rec)),
+			RecordID:  rec.DelegationID,
+			Status:    string(rec.Status),
+			Summary:   delegationFeedSummary(rec),
+			Timestamp: timePointer(rec.UpdatedAt),
+		})
+	}
+	for _, rec := range s.meetings {
+		feed = append(feed, agentOrganizationActivityFeed{
+			Type:      "meeting",
+			AgentID:   firstNonEmpty(rec.ChairAgentID, rec.SponsorAgentID),
+			RecordID:  rec.MeetingID,
+			Status:    string(rec.Status),
+			Summary:   meetingFeedSummary(rec),
+			Timestamp: timePointer(rec.UpdatedAt),
+		})
+	}
+	for agentID, events := range recentEvents {
+		for _, event := range events {
+			feed = append(feed, agentOrganizationActivityFeed{
+				Type:      "event",
+				AgentID:   agentID,
+				Status:    firstNonEmpty(event.Level, event.Event, "log"),
+				Summary:   event.Message,
+				Timestamp: event.Timestamp,
+			})
+		}
+	}
+	slices.SortFunc(feed, func(a, b agentOrganizationActivityFeed) int {
+		if byTime := cmp.Compare(feedEntryUnixNano(b), feedEntryUnixNano(a)); byTime != 0 {
+			return byTime
+		}
+		if byType := cmp.Compare(a.Type, b.Type); byType != 0 {
+			return byType
+		}
+		if byAgent := cmp.Compare(a.AgentID, b.AgentID); byAgent != 0 {
+			return byAgent
+		}
+		return cmp.Compare(a.RecordID, b.RecordID)
+	})
+	if len(feed) > agentOrganizationActivityFeedLimit {
+		feed = feed[:agentOrganizationActivityFeedLimit]
+	}
+	return feed
+}
+
+func delegationFeedSummary(rec agent.AgentDelegationRecord) string {
+	return fmt.Sprintf("Delegation %s: %s -> %s", rec.Status, delegationRequesterID(rec), rec.TargetAgentID)
+}
+
+func meetingFeedSummary(rec agent.AgentMeetingRecord) string {
+	return fmt.Sprintf("Meeting %s: %s", rec.Status, firstNonEmpty(rec.Title, rec.MeetingID))
+}
+
+func feedEntryUnixNano(entry agentOrganizationActivityFeed) int64 {
+	if entry.Timestamp == nil {
+		return 0
+	}
+	return entry.Timestamp.UnixNano()
+}
+
+func timePointer(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	value = value.UTC()
+	return &value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (s *agentOrganizationBuildState) applyMeetingRecord(rec agent.AgentMeetingRecord) {

@@ -1,4 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query"
+import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type {
@@ -9,8 +10,14 @@ import type {
 } from "@/api/agents"
 import { getAgentInbox, getAgentMeetings } from "@/api/agents"
 import { LogsPanel } from "@/components/logs/logs-panel"
+import { Button } from "@/components/ui/button"
 import { useGatewayLogs } from "@/hooks/use-gateway-logs"
 import { useLogWrapColumns } from "@/hooks/use-log-wrap-columns"
+import type { AgentLogScopeMode } from "@/lib/agent-log-filter"
+import {
+  filterAgentLogLines,
+  findAgentLogReferenceFields,
+} from "@/lib/agent-log-filter"
 
 import {
   compactActivityEvents,
@@ -93,10 +100,29 @@ export function AgentOverviewPanel({
   )
 }
 
-export function LiveLogsPanel() {
+export function LiveLogsPanel({ agent }: { agent: AgentOrganizationAgent }) {
   const { t } = useTranslation()
+  const [scopeMode, setScopeMode] = useState<AgentLogScopeMode>("all")
   const { contentRef, measureRef, wrapColumns } = useLogWrapColumns()
   const { error, gatewayStatus, logs, stale } = useGatewayLogs()
+  const visibleLogs = useMemo(
+    () => filterAgentLogLines(logs, agent.id, scopeMode),
+    [agent.id, logs, scopeMode],
+  )
+  const referencedLogCount = useMemo(
+    () =>
+      logs.filter(
+        (line) => findAgentLogReferenceFields(line, agent.id).length > 0,
+      ).length,
+    [agent.id, logs],
+  )
+  const selectedAgentEmptyMessage = t(
+    "pages.agent.organization.detail.live_logs_selected_empty",
+    {
+      defaultValue: "No live logs reference {{agent}} yet.",
+      agent: agent.label || agent.name || agent.id,
+    },
+  )
 
   const statusText = error
     ? t("pages.agent.organization.detail.live_logs_error", {
@@ -128,18 +154,56 @@ export function LiveLogsPanel() {
 
   return (
     <div className="flex min-h-[26rem] flex-col gap-3">
-      <div
-        className={
-          error || stale || gatewayStatus === "error"
-            ? "border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-xs"
-            : "border-border/70 text-muted-foreground rounded-md border px-3 py-2 text-xs"
-        }
-      >
-        {statusText}
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <div
+          className={
+            error || stale || gatewayStatus === "error"
+              ? "border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-xs"
+              : "border-border/70 text-muted-foreground rounded-md border px-3 py-2 text-xs"
+          }
+        >
+          {statusText}
+        </div>
+        <div
+          className="border-border/70 inline-flex w-fit rounded-md border p-1"
+          role="group"
+          aria-label={t(
+            "pages.agent.organization.detail.live_logs_scope_label",
+            "Live log scope",
+          )}
+        >
+          <Button
+            type="button"
+            size="sm"
+            variant={scopeMode === "all" ? "secondary" : "ghost"}
+            onClick={() => setScopeMode("all")}
+          >
+            {t("pages.agent.organization.detail.live_logs_all", "All Logs")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={scopeMode === "selected" ? "secondary" : "ghost"}
+            onClick={() => setScopeMode("selected")}
+          >
+            {t("pages.agent.organization.detail.live_logs_selected", {
+              defaultValue: "Selected Agent",
+            })}
+            <span className="text-muted-foreground tabular-nums">
+              {referencedLogCount}
+            </span>
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1">
         <LogsPanel
-          logs={logs}
+          logs={visibleLogs}
+          emptyMessage={
+            scopeMode === "selected" ? selectedAgentEmptyMessage : undefined
+          }
+          getLineReferenceFields={(line) =>
+            findAgentLogReferenceFields(line, agent.id)
+          }
           wrapColumns={wrapColumns}
           contentRef={contentRef}
           measureRef={measureRef}

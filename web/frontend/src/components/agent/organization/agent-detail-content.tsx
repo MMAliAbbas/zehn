@@ -114,7 +114,7 @@ export function AgentDetailContent({
         ) : activeTab === "meetings" ? (
           <MeetingRecordsPanel query={meetingsQuery} />
         ) : activeTab === "live-logs" ? (
-          <LiveLogsPanel />
+          <LiveLogsPanel agent={agent} />
         ) : (
           <RecentEventsPanel agent={agent} />
         )}

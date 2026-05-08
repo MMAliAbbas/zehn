@@ -14,6 +14,8 @@ function isNearBottom(viewport: HTMLDivElement) {
 }
 
 type LogsPanelProps = {
+  emptyMessage?: string
+  getLineReferenceFields?: (line: string) => string[]
   logs: string[]
   wrapColumns: number
   contentRef: RefObject<HTMLDivElement | null>
@@ -21,6 +23,8 @@ type LogsPanelProps = {
 }
 
 export function LogsPanel({
+  emptyMessage,
+  getLineReferenceFields,
   logs,
   wrapColumns,
   contentRef,
@@ -90,11 +94,21 @@ export function LogsPanel({
             0
           </span>
           {logs.length === 0 ? (
-            <div className="text-zinc-500 italic">{t("pages.logs.empty")}</div>
+            <div className="text-zinc-500 italic">
+              {emptyMessage ?? t("pages.logs.empty")}
+            </div>
           ) : (
-            logs.map((log, index) => (
-              <AnsiLogLine key={index} line={log} wrapColumns={wrapColumns} />
-            ))
+            logs.map((log, index) => {
+              const referenceFields = getLineReferenceFields?.(log) ?? []
+              return (
+                <AnsiLogLine
+                  key={index}
+                  referenceFields={referenceFields}
+                  line={log}
+                  wrapColumns={wrapColumns}
+                />
+              )
+            })
           )}
         </div>
       </ScrollArea>

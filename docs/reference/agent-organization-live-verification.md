@@ -63,6 +63,15 @@ refreshed time, and query state. A background refresh error after data has
 loaded should show a stale query state without clearing the visible command
 center.
 
+Command header totals are scoped to the configured organization agents in the
+loaded launcher config. Delegation and meeting records count only when at least
+one requester, target, sponsor, chair, or participant is still a configured
+agent. Historical records that reference only removed or renamed agent IDs are
+omitted from organization totals and the global Recent Activity feed. If a
+record has both configured and unknown agent IDs, the record can still count,
+but the Recent Activity entry must point at a configured agent so the entry
+opens a visible card and workbench tab.
+
 The Recent Activity feed shows the newest organization-level structured
 activity and gateway events, capped to the newest entries. Delegations open the
 selected agent's Inbox, meetings open Meetings, failures open Failures, and

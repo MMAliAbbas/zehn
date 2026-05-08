@@ -755,6 +755,9 @@ func dereferenceOrganizationAgents(
 
 func (s *agentOrganizationBuildState) applyActivity() {
 	for _, rec := range s.delegations {
+		if s.configuredDelegationAgentID(rec) == "" {
+			continue
+		}
 		s.summary.DelegationCount++
 		if isActiveDelegationStatus(rec.Status) {
 			s.summary.ActiveCount++
@@ -765,6 +768,9 @@ func (s *agentOrganizationBuildState) applyActivity() {
 		s.applyDelegationRecord(rec)
 	}
 	for _, rec := range s.meetings {
+		if s.configuredMeetingAgentID(rec) == "" {
+			continue
+		}
 		s.summary.MeetingCount++
 		if rec.Status == agent.AgentMeetingStatusStarted {
 			s.summary.ActiveCount++
@@ -824,13 +830,17 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 ) []agentOrganizationActivityFeed {
 	feed := make([]agentOrganizationActivityFeed, 0, len(s.delegations)+len(s.meetings))
 	for _, rec := range s.delegations {
+		agentID := s.configuredDelegationAgentID(rec)
+		if agentID == "" {
+			continue
+		}
 		entryType := "delegation"
 		if rec.Status == agent.AgentDelegationStatusFailed {
 			entryType = "failure"
 		}
 		feed = append(feed, agentOrganizationActivityFeed{
 			Type:      entryType,
-			AgentID:   firstNonEmpty(rec.TargetAgentID, delegationRequesterID(rec)),
+			AgentID:   agentID,
 			RecordID:  rec.DelegationID,
 			Status:    string(rec.Status),
 			Summary:   delegationFeedSummary(rec),
@@ -838,13 +848,17 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 		})
 	}
 	for _, rec := range s.meetings {
+		agentID := s.configuredMeetingAgentID(rec)
+		if agentID == "" {
+			continue
+		}
 		entryType := "meeting"
 		if rec.Status == agent.AgentMeetingStatusFailed {
 			entryType = "failure"
 		}
 		feed = append(feed, agentOrganizationActivityFeed{
 			Type:      entryType,
-			AgentID:   firstNonEmpty(rec.ChairAgentID, rec.SponsorAgentID),
+			AgentID:   agentID,
 			RecordID:  rec.MeetingID,
 			Status:    string(rec.Status),
 			Summary:   meetingFeedSummary(rec),
@@ -878,6 +892,38 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 		feed = feed[:agentOrganizationActivityFeedLimit]
 	}
 	return feed
+}
+
+func (s *agentOrganizationBuildState) configuredDelegationAgentID(rec agent.AgentDelegationRecord) string {
+	targetID := strings.TrimSpace(rec.TargetAgentID)
+	if _, ok := s.agents[targetID]; ok {
+		return targetID
+	}
+	requesterID := delegationRequesterID(rec)
+	if _, ok := s.agents[requesterID]; ok {
+		return requesterID
+	}
+	return ""
+}
+
+func (s *agentOrganizationBuildState) configuredMeetingAgentID(rec agent.AgentMeetingRecord) string {
+	if chairID := strings.TrimSpace(rec.ChairAgentID); chairID != "" {
+		if _, ok := s.agents[chairID]; ok {
+			return chairID
+		}
+	}
+	if sponsorID := strings.TrimSpace(rec.SponsorAgentID); sponsorID != "" {
+		if _, ok := s.agents[sponsorID]; ok {
+			return sponsorID
+		}
+	}
+	for _, participantID := range rec.Participants {
+		participantID = strings.TrimSpace(participantID)
+		if _, ok := s.agents[participantID]; ok {
+			return participantID
+		}
+	}
+	return ""
 }
 
 func delegationFeedSummary(rec agent.AgentDelegationRecord) string {

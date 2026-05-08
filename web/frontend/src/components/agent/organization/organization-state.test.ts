@@ -6,6 +6,7 @@ import test from "node:test"
 import {
   createOrganizationSelectionState,
   DEFAULT_WORKBENCH_SECTION,
+  detailTabForWorkbenchSection,
   resolveActivityShortcut,
   resolveSelectedOrganizationAgent,
   selectOrganizationAgent,
@@ -77,6 +78,10 @@ test("resolves error shortcuts to the failures workbench with recent events as t
     workbenchSection: "failures",
     detailTab: "recent",
   })
+})
+
+test("resolves live logs workbench selection to the live logs detail tab", () => {
+  assert.equal(detailTabForWorkbenchSection("live-logs"), "live-logs")
 })
 
 test("resolves a selected agent from snapshot agents before walking roots", () => {

@@ -4,25 +4,50 @@ import { useEffect, useRef, useState } from "react"
 import { clearGatewayLogs, getGatewayLogs } from "@/api/gateway"
 import { gatewayAtom } from "@/store/gateway"
 
+import {
+  applyGatewayLogsError,
+  applyGatewayLogsResponse,
+  canPollGatewayLogs,
+  createGatewayLogsState,
+  isGatewayLogsStale,
+} from "./gateway-logs-state"
+
 export function useGatewayLogs() {
-  const [logs, setLogs] = useState<string[]>([])
+  const [logState, setLogState] = useState(createGatewayLogsState)
+  const [now, setNow] = useState(() => Date.now())
   const [clearing, setClearing] = useState(false)
-  const logOffsetRef = useRef(0)
-  const logRunIdRef = useRef(-1)
+  const logStateRef = useRef(logState)
   const syncTokenRef = useRef(0)
 
   const gateway = useAtomValue(gatewayAtom)
+
+  useEffect(() => {
+    logStateRef.current = logState
+  }, [logState])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [])
 
   const clearLogs = async () => {
     setClearing(true)
     try {
       const data = await clearGatewayLogs()
       syncTokenRef.current += 1
-      setLogs([])
-      logOffsetRef.current = data.log_total ?? 0
-      if (data.log_run_id !== undefined) {
-        logRunIdRef.current = data.log_run_id
-      }
+      setLogState((current) => ({
+        ...current,
+        logs: [],
+        logOffset: data.log_total ?? 0,
+        logRunID: data.log_run_id ?? current.logRunID,
+        error: null,
+        lastUpdatedAt: Date.now(),
+      }))
     } catch {
       // Ignore clear failures silently to avoid noisy transient errors.
     } finally {
@@ -35,12 +60,7 @@ export function useGatewayLogs() {
     let timeout: ReturnType<typeof setTimeout>
 
     const fetchLogs = async () => {
-      if (
-        !mounted ||
-        !["running", "starting", "restarting", "stopping"].includes(
-          gateway.status,
-        )
-      ) {
+      if (!mounted || !canPollGatewayLogs(gateway.status)) {
         if (mounted) {
           timeout = setTimeout(fetchLogs, 1000)
         }
@@ -49,8 +69,8 @@ export function useGatewayLogs() {
 
       try {
         const requestToken = syncTokenRef.current
-        const requestOffset = logOffsetRef.current
-        const requestRunId = logRunIdRef.current
+        const requestOffset = logStateRef.current.logOffset
+        const requestRunId = logStateRef.current.logRunID
         const data = await getGatewayLogs({
           log_offset: requestOffset,
           log_run_id: requestRunId,
@@ -60,21 +80,15 @@ export function useGatewayLogs() {
           return
         }
 
-        if (data.log_run_id !== undefined && data.log_run_id !== requestRunId) {
-          logRunIdRef.current = data.log_run_id
-          logOffsetRef.current = 0
-          if (data.logs) {
-            setLogs(data.logs)
-            logOffsetRef.current = data.log_total || data.logs.length
-          }
-        } else if (data.logs && data.logs.length > 0) {
-          const nextLogs = data.logs
-          setLogs((prev) => [...prev, ...nextLogs])
-          logOffsetRef.current =
-            data.log_total || logOffsetRef.current + nextLogs.length
+        const receivedAt = Date.now()
+        setNow(receivedAt)
+        setLogState((current) =>
+          applyGatewayLogsResponse(current, data, receivedAt),
+        )
+      } catch (error) {
+        if (mounted) {
+          setLogState((current) => applyGatewayLogsError(current, error))
         }
-      } catch {
-        // Ignore simple fetch errors during polling.
       } finally {
         if (mounted) {
           timeout = setTimeout(fetchLogs, 1000)
@@ -93,6 +107,9 @@ export function useGatewayLogs() {
   return {
     clearLogs,
     clearing,
-    logs,
+    error: logState.error,
+    gatewayStatus: gateway.status,
+    logs: logState.logs,
+    stale: isGatewayLogsStale(logState, now),
   }
 }

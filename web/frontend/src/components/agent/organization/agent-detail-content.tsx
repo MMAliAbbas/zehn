@@ -13,6 +13,7 @@ import {
 import {
   AgentOverviewPanel,
   DelegationRecordsPanel,
+  LiveLogsPanel,
   MeetingRecordsPanel,
   RecentEventsPanel,
 } from "./detail-panels"
@@ -112,6 +113,8 @@ export function AgentDetailContent({
           />
         ) : activeTab === "meetings" ? (
           <MeetingRecordsPanel query={meetingsQuery} />
+        ) : activeTab === "live-logs" ? (
+          <LiveLogsPanel />
         ) : (
           <RecentEventsPanel agent={agent} />
         )}
@@ -175,6 +178,10 @@ function agentDetailTabs(
     {
       key: "recent" as const,
       label: t("pages.agent.organization.detail.recent", "Recent Events"),
+    },
+    {
+      key: "live-logs" as const,
+      label: t("pages.agent.organization.detail.live_logs", "Live Logs"),
     },
   ]
 }

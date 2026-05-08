@@ -8,6 +8,9 @@ import type {
   AgentOrganizationRecentEvent,
 } from "@/api/agents"
 import { getAgentInbox, getAgentMeetings } from "@/api/agents"
+import { LogsPanel } from "@/components/logs/logs-panel"
+import { useGatewayLogs } from "@/hooks/use-gateway-logs"
+import { useLogWrapColumns } from "@/hooks/use-log-wrap-columns"
 
 import {
   compactActivityEvents,
@@ -84,6 +87,62 @@ export function AgentOverviewPanel({
             "Last updated",
           )}
           value={formatTimestamp(agent.activity.last_updated_at, t)}
+        />
+      </div>
+    </div>
+  )
+}
+
+export function LiveLogsPanel() {
+  const { t } = useTranslation()
+  const { contentRef, measureRef, wrapColumns } = useLogWrapColumns()
+  const { error, gatewayStatus, logs, stale } = useGatewayLogs()
+
+  const statusText = error
+    ? t("pages.agent.organization.detail.live_logs_error", {
+        defaultValue: "Log polling error: {{message}}",
+        message: error,
+      })
+    : stale
+      ? t(
+          "pages.agent.organization.detail.live_logs_stale",
+          "Log polling is stale",
+        )
+      : gatewayStatus === "stopped"
+        ? t(
+            "pages.agent.organization.detail.live_logs_stopped",
+            "Gateway is stopped",
+          )
+        : gatewayStatus === "error"
+          ? t(
+              "pages.agent.organization.detail.live_logs_gateway_error",
+              "Gateway is in an error state",
+            )
+          : t("pages.agent.organization.detail.live_logs_status", {
+              defaultValue: "Gateway {{status}}",
+              status: t(
+                `pages.agent.organization.status.${gatewayStatus}`,
+                gatewayStatus,
+              ),
+            })
+
+  return (
+    <div className="flex min-h-[26rem] flex-col gap-3">
+      <div
+        className={
+          error || stale || gatewayStatus === "error"
+            ? "border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-xs"
+            : "border-border/70 text-muted-foreground rounded-md border px-3 py-2 text-xs"
+        }
+      >
+        {statusText}
+      </div>
+      <div className="min-h-0 flex-1">
+        <LogsPanel
+          logs={logs}
+          wrapColumns={wrapColumns}
+          contentRef={contentRef}
+          measureRef={measureRef}
         />
       </div>
     </div>

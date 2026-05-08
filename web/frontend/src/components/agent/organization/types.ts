@@ -25,7 +25,7 @@ export const AGENT_WORKBENCH_SECTIONS = [
 
 export type AgentDetailTab = Exclude<
   AgentWorkbenchSection,
-  "failures" | "live-logs"
+  "failures"
 >
 
 export type AgentActivityShortcut = "inbox" | "outbox" | "meetings" | "errors"

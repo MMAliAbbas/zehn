@@ -53,7 +53,7 @@ export function resolveActivityShortcut(
 export function detailTabForWorkbenchSection(
   section: AgentWorkbenchSection,
 ): AgentDetailTab {
-  if (section === "failures" || section === "live-logs") {
+  if (section === "failures") {
     return "recent"
   }
 

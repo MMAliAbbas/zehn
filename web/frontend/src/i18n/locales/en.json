@@ -515,6 +515,12 @@
         "detail": {
           "overview": "Overview",
           "recent": "Recent Events",
+          "live_logs": "Live Logs",
+          "live_logs_error": "Log polling error: {{message}}",
+          "live_logs_stale": "Log polling is stale",
+          "live_logs_stopped": "Gateway is stopped",
+          "live_logs_gateway_error": "Gateway is in an error state",
+          "live_logs_status": "Gateway {{status}}",
           "tabs_label": "Agent activity sections",
           "workspace": "Workspace",
           "group": "Group",

@@ -14,7 +14,10 @@ export interface AgentOrganizationActivityRecord {
   status: string
   role?: string
   agent_id?: string
+  artifact_refs?: string[]
+  created_at?: string
   updated_at?: string
+  completed_at?: string
 }
 
 export interface AgentOrganizationRecentEvent {

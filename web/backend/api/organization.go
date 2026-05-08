@@ -71,12 +71,15 @@ type agentOrganizationAgentActivity struct {
 }
 
 type agentOrganizationActivityRecord struct {
-	Type      string     `json:"type"`
-	RecordID  string     `json:"record_id"`
-	Status    string     `json:"status"`
-	Role      string     `json:"role,omitempty"`
-	AgentID   string     `json:"agent_id,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	Type         string     `json:"type"`
+	RecordID     string     `json:"record_id"`
+	Status       string     `json:"status"`
+	Role         string     `json:"role,omitempty"`
+	AgentID      string     `json:"agent_id,omitempty"`
+	ArtifactRefs []string   `json:"artifact_refs,omitempty"`
+	CreatedAt    *time.Time `json:"created_at,omitempty"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }
 
 type agentOrganizationRecentEvent struct {
@@ -670,7 +673,15 @@ func (s *agentOrganizationBuildState) applyRecentEvents(events map[string][]agen
 func (s *agentOrganizationBuildState) applyDelegationRecord(rec agent.AgentDelegationRecord) {
 	targetID := strings.TrimSpace(rec.TargetAgentID)
 	requesterID := delegationRequesterID(rec)
-	activity := organizationRecordActivity("delegation", rec.DelegationID, string(rec.Status), rec.UpdatedAt)
+	activity := organizationRecordActivity(
+		"delegation",
+		rec.DelegationID,
+		string(rec.Status),
+		rec.CreatedAt,
+		rec.UpdatedAt,
+		rec.CompletedAt,
+		rec.Request.ArtifactRefs,
+	)
 
 	if target := s.agents[targetID]; target != nil {
 		target.Activity.InboxCount++
@@ -783,7 +794,15 @@ func firstNonEmpty(values ...string) string {
 
 func (s *agentOrganizationBuildState) applyMeetingRecord(rec agent.AgentMeetingRecord) {
 	participantIDs := meetingParticipantIDs(rec)
-	activity := organizationRecordActivity("meeting", rec.MeetingID, string(rec.Status), rec.UpdatedAt)
+	activity := organizationRecordActivity(
+		"meeting",
+		rec.MeetingID,
+		string(rec.Status),
+		rec.CreatedAt,
+		rec.UpdatedAt,
+		rec.CompletedAt,
+		rec.ArtifactRefs,
+	)
 	for agentID, role := range participantIDs {
 		agentState := s.agents[agentID]
 		if agentState == nil {
@@ -827,16 +846,28 @@ func organizationRecordActivity(
 	recordType string,
 	recordID string,
 	status string,
+	createdAt time.Time,
 	updatedAt time.Time,
+	completedAt *time.Time,
+	artifactRefs []string,
 ) agentOrganizationActivityRecord {
 	activity := agentOrganizationActivityRecord{
-		Type:     recordType,
-		RecordID: recordID,
-		Status:   status,
+		Type:         recordType,
+		RecordID:     recordID,
+		Status:       status,
+		ArtifactRefs: append([]string(nil), artifactRefs...),
+	}
+	if !createdAt.IsZero() {
+		created := createdAt.UTC()
+		activity.CreatedAt = &created
 	}
 	if !updatedAt.IsZero() {
 		updated := updatedAt.UTC()
 		activity.UpdatedAt = &updated
+	}
+	if completedAt != nil && !completedAt.IsZero() {
+		completed := completedAt.UTC()
+		activity.CompletedAt = &completed
 	}
 	return activity
 }

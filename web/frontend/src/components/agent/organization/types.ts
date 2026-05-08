@@ -23,10 +23,7 @@ export const AGENT_WORKBENCH_SECTIONS = [
   "live-logs",
 ] as const satisfies readonly AgentWorkbenchSection[]
 
-export type AgentDetailTab = Exclude<
-  AgentWorkbenchSection,
-  "failures"
->
+export type AgentDetailTab = AgentWorkbenchSection
 
 export type AgentActivityShortcut = "inbox" | "outbox" | "meetings" | "errors"
 

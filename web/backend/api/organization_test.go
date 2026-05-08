@@ -224,6 +224,57 @@ func TestHandleAgentOrganization_NewerActiveDelegationSupersedesOlderFailure(t *
 	}
 }
 
+func TestHandleAgentOrganization_LastFailureIncludesDrilldownMetadata(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	failed, err := store.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "failed work",
+		ArtifactRefs:  []string{"github:issue/123"},
+	})
+	if err != nil {
+		t.Fatalf("Requested(failed) error = %v", err)
+	}
+	if err := store.Failed(context.Background(), failed.DelegationID, errors.New("private failure details")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+	failed.Status = agent.AgentDelegationStatusFailed
+	createdAt := time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC)
+	completedAt := time.Date(2026, 5, 7, 9, 30, 0, 0, time.UTC)
+	setDelegationTimes(t, cfg, &failed, createdAt, completedAt)
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	lastFailure := resp.Agents["worker"].Activity.LastFailure
+	if lastFailure == nil {
+		t.Fatal("worker last failure is nil, want drilldown record")
+	}
+	if lastFailure.RecordID != failed.DelegationID || lastFailure.AgentID != "lead" || lastFailure.Role != "target" {
+		t.Fatalf("last failure identity = %+v, want record %q peer lead role target", lastFailure, failed.DelegationID)
+	}
+	if lastFailure.CreatedAt == nil || !lastFailure.CreatedAt.Equal(createdAt) {
+		t.Fatalf("last failure created_at = %+v, want %s", lastFailure.CreatedAt, createdAt)
+	}
+	if lastFailure.CompletedAt == nil || !lastFailure.CompletedAt.Equal(completedAt) {
+		t.Fatalf("last failure completed_at = %+v, want %s", lastFailure.CompletedAt, completedAt)
+	}
+	if got, want := strings.Join(lastFailure.ArtifactRefs, ","), "github:issue/123"; got != want {
+		t.Fatalf("last failure artifact refs = %q, want %q", got, want)
+	}
+}
+
 func TestHandleAgentOrganization_NewerFailureRemainsCurrentWithoutNewerActiveRecord(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{
@@ -662,6 +713,28 @@ func setMeetingCreatedAt(
 		t.Fatalf("MarshalIndent() error = %v", err)
 	}
 	path := filepath.Join(cfg.WorkspacePath(), "meetings", rec.MeetingID+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
+func setDelegationTimes(
+	t *testing.T,
+	cfg *config.Config,
+	rec *agent.AgentDelegationRecord,
+	createdAt time.Time,
+	completedAt time.Time,
+) {
+	t.Helper()
+
+	rec.CreatedAt = createdAt
+	rec.UpdatedAt = completedAt
+	rec.CompletedAt = &completedAt
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	path := filepath.Join(cfg.WorkspacePath(), "delegations", rec.DelegationID+".json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}

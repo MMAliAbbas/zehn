@@ -31,16 +31,14 @@ export function selectOrganizationAgent(
   }
 }
 
-export function resolveActivityShortcut(
-  shortcut: AgentActivityShortcut,
-): {
+export function resolveActivityShortcut(shortcut: AgentActivityShortcut): {
   workbenchSection: AgentWorkbenchSection
   detailTab: AgentDetailTab
 } {
   if (shortcut === "errors") {
     return {
       workbenchSection: "failures",
-      detailTab: "recent",
+      detailTab: "failures",
     }
   }
 
@@ -53,10 +51,6 @@ export function resolveActivityShortcut(
 export function detailTabForWorkbenchSection(
   section: AgentWorkbenchSection,
 ): AgentDetailTab {
-  if (section === "failures") {
-    return "recent"
-  }
-
   return section
 }
 

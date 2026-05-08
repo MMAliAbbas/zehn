@@ -1,11 +1,11 @@
 /// <reference types="node" />
-
 import assert from "node:assert/strict"
+
 import test from "node:test"
 
 import {
-  createOrganizationSelectionState,
   DEFAULT_WORKBENCH_SECTION,
+  createOrganizationSelectionState,
   detailTabForWorkbenchSection,
   resolveActivityShortcut,
   resolveSelectedOrganizationAgent,
@@ -73,11 +73,15 @@ test("resolves activity shortcuts to deterministic visible detail tabs", () => {
   })
 })
 
-test("resolves error shortcuts to the failures workbench with recent events as the visible fallback", () => {
+test("resolves error shortcuts directly to the failures detail tab", () => {
   assert.deepEqual(resolveActivityShortcut("errors"), {
     workbenchSection: "failures",
-    detailTab: "recent",
+    detailTab: "failures",
   })
+})
+
+test("resolves failures workbench selection to the failures detail tab", () => {
+  assert.equal(detailTabForWorkbenchSection("failures"), "failures")
 })
 
 test("resolves live logs workbench selection to the live logs detail tab", () => {

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import type {
   AgentDelegationActivityRecord,
   AgentMeetingActivityRecord,
+  AgentOrganizationActivityRecord,
   AgentOrganizationAgent,
   AgentOrganizationRecentEvent,
 } from "@/api/agents"
@@ -425,6 +426,145 @@ function MeetingRecordItem({ record }: { record: AgentMeetingActivityRecord }) {
       <ArtifactSummary refs={record.artifact_refs} />
     </ActivityRecordFrame>
   )
+}
+
+export function FailureRecordsPanel({
+  agent,
+}: {
+  agent: AgentOrganizationAgent
+}) {
+  const { t } = useTranslation()
+  const current = agent.activity.current
+  const lastFailure = agent.activity.last_failure
+  const currentIsFailure = Boolean(
+    current && lastFailure && sameActivityRecord(current, lastFailure),
+  )
+  const records = compactActivityEvents(
+    currentIsFailure ? current : undefined,
+    lastFailure,
+  )
+
+  if (records.length === 0) {
+    return (
+      <TabState
+        title={t("pages.agent.organization.detail.no_failures", "No failures")}
+        detail={t(
+          "pages.agent.organization.detail.no_failures_detail",
+          "This agent has no visible failure records.",
+        )}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {!currentIsFailure && lastFailure ? (
+        <div className="border-border/70 bg-muted/20 text-muted-foreground rounded-md border px-3 py-2 text-xs">
+          {current
+            ? t("pages.agent.organization.detail.stale_failure_notice", {
+                defaultValue:
+                  "Last failure is historical. Newer current activity is {{activity}}.",
+                activity: summarizeActivity(current, t),
+              })
+            : t(
+                "pages.agent.organization.detail.last_failure_notice",
+                "Last failure is not the current activity.",
+              )}
+        </div>
+      ) : null}
+      {records.map((record) => (
+        <FailureRecordItem
+          key={`${record.type}:${record.record_id}`}
+          current={currentIsFailure && sameActivityRecord(record, current)}
+          record={record}
+        />
+      ))}
+    </div>
+  )
+}
+
+function FailureRecordItem({
+  current,
+  record,
+}: {
+  current: boolean
+  record: AgentOrganizationActivityRecord
+}) {
+  const { t } = useTranslation()
+  return (
+    <ActivityRecordFrame
+      status={record.status}
+      tone={current ? "auto" : "muted"}
+    >
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">
+            {current
+              ? t(
+                  "pages.agent.organization.detail.current_failure",
+                  "Current failure",
+                )
+              : t(
+                  "pages.agent.organization.detail.historical_failure",
+                  "Historical failure",
+                )}
+          </div>
+          <div className="text-muted-foreground mt-0.5 truncate font-mono text-xs">
+            {record.record_id}
+          </div>
+        </div>
+        <StatusBadge status={record.status} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <RecordFact
+          label={t("pages.agent.organization.detail.record_type", "Type")}
+          value={t(
+            `pages.agent.organization.activity_type.${record.type}`,
+            record.type,
+          )}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.role_label", "Role")}
+          value={
+            record.role
+              ? t(`pages.agent.organization.role.${record.role}`, record.role)
+              : t("common.notAvailable", "Unavailable")
+          }
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.peer_agent_short", "Peer")}
+          value={record.agent_id || t("common.notAvailable", "Unavailable")}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.status", "Status")}
+          value={t(
+            `pages.agent.organization.status.${record.status}`,
+            record.status,
+          )}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.created", "Created")}
+          value={formatTimestamp(record.created_at, t)}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.updated", "Updated")}
+          value={formatTimestamp(record.updated_at, t)}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.completed", "Completed")}
+          value={formatTimestamp(record.completed_at, t)}
+        />
+      </div>
+      <ArtifactSummary refs={record.artifact_refs} />
+    </ActivityRecordFrame>
+  )
+}
+
+function sameActivityRecord(
+  a: AgentOrganizationActivityRecord | undefined,
+  b: AgentOrganizationActivityRecord | undefined,
+) {
+  return Boolean(a && b && a.type === b.type && a.record_id === b.record_id)
 }
 
 export function RecentEventsPanel({

@@ -58,17 +58,20 @@ export function TabState({
 
 export function ActivityRecordFrame({
   status,
+  tone = "auto",
   children,
 }: {
   status: string
+  tone?: "auto" | "muted"
   children: ReactNode
 }) {
-  const isProblem = isProblemStatus(status)
+  const isProblem = tone !== "muted" && isProblemStatus(status)
   return (
     <article
       className={cn(
         "border-border/70 rounded-lg border px-3 py-3 text-sm",
         isProblem && "border-destructive/30 bg-destructive/3",
+        tone === "muted" && "bg-muted/20",
       )}
     >
       {children}
@@ -89,22 +92,34 @@ export function RecordFact({ label, value }: { label: string; value: string }) {
 
 export function ArtifactSummary({ refs }: { refs?: string[] }) {
   const { t } = useTranslation()
-  const count = refs?.length ?? 0
+  const artifactRefs = refs ?? []
+  const count = artifactRefs.length
   return (
-    <div className="text-muted-foreground mt-3 flex min-w-0 items-center gap-1.5 text-xs">
-      <IconFileDescription className="size-3.5 shrink-0" />
-      <span className="truncate">
-        {count > 0
-          ? t("pages.agent.organization.detail.artifact_count", {
-              defaultValue: "{{count}} artifact reference",
-              defaultValue_plural: "{{count}} artifact references",
-              count,
-            })
-          : t(
-              "pages.agent.organization.detail.no_artifacts",
-              "No artifact references",
-            )}
-      </span>
+    <div className="text-muted-foreground mt-3 min-w-0 text-xs">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <IconFileDescription className="size-3.5 shrink-0" />
+        <span className="truncate">
+          {count > 0
+            ? t("pages.agent.organization.detail.artifact_count", {
+                defaultValue: "{{count}} artifact reference",
+                defaultValue_plural: "{{count}} artifact references",
+                count,
+              })
+            : t(
+                "pages.agent.organization.detail.no_artifacts",
+                "No artifact references",
+              )}
+        </span>
+      </div>
+      {count > 0 ? (
+        <div className="mt-2 space-y-1">
+          {artifactRefs.map((ref) => (
+            <div key={ref} className="truncate font-mono" title={ref}>
+              {ref}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

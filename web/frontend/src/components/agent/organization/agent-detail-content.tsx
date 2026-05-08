@@ -13,6 +13,7 @@ import {
 import {
   AgentOverviewPanel,
   DelegationRecordsPanel,
+  FailureRecordsPanel,
   LiveLogsPanel,
   MeetingRecordsPanel,
   RecentEventsPanel,
@@ -113,6 +114,8 @@ export function AgentDetailContent({
           />
         ) : activeTab === "meetings" ? (
           <MeetingRecordsPanel query={meetingsQuery} />
+        ) : activeTab === "failures" ? (
+          <FailureRecordsPanel agent={agent} />
         ) : activeTab === "live-logs" ? (
           <LiveLogsPanel agent={agent} />
         ) : (
@@ -174,6 +177,11 @@ function agentDetailTabs(
       key: "meetings" as const,
       label: t("pages.agent.organization.meetings", "Meetings"),
       count: agent.activity.meeting_count,
+    },
+    {
+      key: "failures" as const,
+      label: t("pages.agent.organization.detail.failures", "Failures"),
+      count: agent.activity.failure_count,
     },
     {
       key: "recent" as const,

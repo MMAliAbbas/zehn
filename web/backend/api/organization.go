@@ -1066,6 +1066,13 @@ func shouldReplaceCurrentActivity(
 		return true
 	}
 	currentPriority := organizationPriorityForStatus(current)
+	currentActive := organizationPriorityIsActive(currentPriority)
+	candidateActive := organizationPriorityIsActive(priority)
+	if currentActive != candidateActive {
+		if isCompletedOrganizationPriority(currentPriority) || isCompletedOrganizationPriority(priority) {
+			return candidateActive
+		}
+	}
 	if byTime := cmp.Compare(activityRecordUnixNano(candidate), activityRecordUnixNano(*current)); byTime != 0 {
 		return byTime > 0
 	}
@@ -1142,6 +1149,16 @@ func organizationPriorityForStatus(record *agentOrganizationActivityRecord) int 
 		return organizationStatusPriorityDelegating
 	}
 	return organizationStatusPriorityIdle
+}
+
+func organizationPriorityIsActive(priority int) bool {
+	return priority == organizationStatusPriorityDelegating ||
+		priority == organizationStatusPriorityWorking ||
+		priority == organizationStatusPriorityMeeting
+}
+
+func isCompletedOrganizationPriority(priority int) bool {
+	return priority == organizationStatusPriorityCompleted
 }
 
 func delegationRecordPriority(status agent.AgentDelegationStatus, role string) int {

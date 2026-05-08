@@ -224,6 +224,131 @@ func TestHandleAgentOrganization_NewerActiveDelegationSupersedesOlderFailure(t *
 	}
 }
 
+func TestHandleAgentOrganization_OlderActiveDelegationSupersedesNewerCompletedRecord(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	active, err := store.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "active work",
+	})
+	if err != nil {
+		t.Fatalf("Requested(active) error = %v", err)
+	}
+	if err := store.Running(context.Background(), active.DelegationID); err != nil {
+		t.Fatalf("Running(active) error = %v", err)
+	}
+	active.Status = agent.AgentDelegationStatusRunning
+	setDelegationCreatedAt(t, cfg, &active, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	completed, err := store.Requested(context.Background(), agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "completed work",
+	})
+	if err != nil {
+		t.Fatalf("Requested(completed) error = %v", err)
+	}
+	if err := store.Completed(context.Background(), completed.DelegationID, agent.AgentDelegationResult{Status: agent.TurnEndStatusCompleted}); err != nil {
+		t.Fatalf("Completed() error = %v", err)
+	}
+	completed.Status = agent.AgentDelegationStatusCompleted
+	setDelegationTimes(
+		t,
+		cfg,
+		&completed,
+		time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 7, 10, 30, 0, 0, time.UTC),
+	)
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	worker := resp.Agents["worker"]
+	if status := worker.Status; status != agentOrganizationStatusWorking {
+		t.Fatalf("worker status = %q, want %q", status, agentOrganizationStatusWorking)
+	}
+	if current := worker.Activity.Current; current == nil || current.RecordID != active.DelegationID {
+		t.Fatalf("worker current = %+v, want active delegation %q", current, active.DelegationID)
+	}
+}
+
+func TestHandleAgentOrganization_OlderActiveMeetingSupersedesNewerCompletedRecord(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "sponsor", Name: "Sponsor"},
+			{ID: "chair", Name: "Chair"},
+			{ID: "participant", Name: "Participant"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	active, err := store.Started(context.Background(), agent.AgentMeetingRequest{
+		Title:               "Active Review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+		Goal:                "active meeting goal",
+	})
+	if err != nil {
+		t.Fatalf("Started(active) error = %v", err)
+	}
+	setMeetingCreatedAt(t, cfg, &active, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	completed, err := store.Started(context.Background(), agent.AgentMeetingRequest{
+		Title:               "Completed Review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+		Goal:                "completed meeting goal",
+	})
+	if err != nil {
+		t.Fatalf("Started(completed) error = %v", err)
+	}
+	if err := store.Completed(
+		context.Background(),
+		completed.MeetingID,
+		agent.AgentMeetingChairTurn{AgentID: "chair"},
+		agent.AgentMeetingOutcome{Recommendation: "ship"},
+	); err != nil {
+		t.Fatalf("Completed() error = %v", err)
+	}
+	completed.Status = agent.AgentMeetingStatusCompleted
+	setMeetingTimes(
+		t,
+		cfg,
+		&completed,
+		time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 7, 10, 30, 0, 0, time.UTC),
+	)
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	for _, agentID := range []string{"sponsor", "chair", "participant"} {
+		if status := resp.Agents[agentID].Status; status != agentOrganizationStatusMeeting {
+			t.Fatalf("%s status = %q, want %q", agentID, status, agentOrganizationStatusMeeting)
+		}
+		if current := resp.Agents[agentID].Activity.Current; current == nil || current.RecordID != active.MeetingID {
+			t.Fatalf("%s current = %+v, want active meeting %q", agentID, current, active.MeetingID)
+		}
+	}
+}
+
 func TestHandleAgentOrganization_LastFailureIncludesDrilldownMetadata(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{
@@ -1048,6 +1173,28 @@ func setDelegationTimes(
 		t.Fatalf("MarshalIndent() error = %v", err)
 	}
 	path := filepath.Join(cfg.WorkspacePath(), "delegations", rec.DelegationID+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
+func setMeetingTimes(
+	t *testing.T,
+	cfg *config.Config,
+	rec *agent.AgentMeetingRecord,
+	createdAt time.Time,
+	completedAt time.Time,
+) {
+	t.Helper()
+
+	rec.CreatedAt = createdAt
+	rec.UpdatedAt = completedAt
+	rec.CompletedAt = &completedAt
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	path := filepath.Join(cfg.WorkspacePath(), "meetings", rec.MeetingID+".json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}

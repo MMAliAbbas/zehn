@@ -102,9 +102,10 @@ references.
 
 ## Badge Meanings
 
-- `Idle`: the agent is configured and has no newer active or failed structured
+- `Idle`: the agent is configured and has no active or failed structured
   activity selected as current. A completed record can still appear as the
-  current activity while the badge is idle.
+  current activity while the badge is idle, but it must not replace any active
+  visible work or meeting for the same agent.
 - `Working`: the current selected record is an active delegation targeting this
   agent.
 - `Delegating`: the current selected record is an active delegation requested
@@ -115,11 +116,16 @@ references.
   meeting involving this agent and no newer active or completed record has
   superseded it.
 
-Current activity is selected by record `updated_at` first, then by a stable
-tie-break: failed, meeting, working, delegating, completed, then idle. Failed
-records are retained separately through `last_failure` and error counters, so
-an old failure remains visible without permanently masking newer operational
-work.
+Current activity selection gives active visible work and active meetings
+precedence over completed records before comparing timestamps. This keeps an
+agent in `Working`, `Delegating`, or `Meeting` while an older active record is
+still open, even if a newer completed record exists for the same agent. For all
+other structured records, selection uses record `updated_at` first, then a
+stable tie-break: failed, meeting, working, delegating, completed, then idle.
+Failed records are retained separately through `last_failure` and error
+counters, so an old failure remains visible without permanently masking newer
+operational work. A newer failure can still become current when no newer active
+or completed record has superseded it.
 
 Recent gateway events can appear in the detail drawer as secondary evidence,
 but they do not change badge status, counters, current activity, or

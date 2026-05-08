@@ -722,8 +722,12 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 		})
 	}
 	for _, rec := range s.meetings {
+		entryType := "meeting"
+		if rec.Status == agent.AgentMeetingStatusFailed {
+			entryType = "failure"
+		}
 		feed = append(feed, agentOrganizationActivityFeed{
-			Type:      "meeting",
+			Type:      entryType,
 			AgentID:   firstNonEmpty(rec.ChairAgentID, rec.SponsorAgentID),
 			RecordID:  rec.MeetingID,
 			Status:    string(rec.Status),

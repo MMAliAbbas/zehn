@@ -35,6 +35,26 @@ test("matches selected agents in deterministic key-value log fields", () => {
   ])
 })
 
+test("matches selected agents in all backend-supported routing log fields", () => {
+  const line = JSON.stringify({
+    level: "info",
+    event: "agent.route",
+    child_agent_id: "li-ops",
+    route_agent_id: "li-sales",
+    scope_agent_id: "li-finance",
+  })
+
+  assert.deepEqual(findAgentLogReferenceFields(line, "li-ops"), [
+    "child_agent_id",
+  ])
+  assert.deepEqual(findAgentLogReferenceFields(line, "li-sales"), [
+    "route_agent_id",
+  ])
+  assert.deepEqual(findAgentLogReferenceFields(line, "li-finance"), [
+    "scope_agent_id",
+  ])
+})
+
 test("filters only selected-agent lines without mutating the source buffer", () => {
   const logs = [
     "level=info agent_id=li-cto msg=start",

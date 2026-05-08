@@ -7,6 +7,9 @@ export const AGENT_LOG_REFERENCE_FIELDS = [
   "requester_id",
   "sponsor_agent_id",
   "chair_agent_id",
+  "child_agent_id",
+  "route_agent_id",
+  "scope_agent_id",
 ] as const
 
 const AGENT_LOG_REFERENCE_FIELD_SET = new Set<string>(
@@ -14,7 +17,7 @@ const AGENT_LOG_REFERENCE_FIELD_SET = new Set<string>(
 )
 const ANSI_PATTERN = new RegExp(String.raw`\u001B\[[0-9;]*m`, "g")
 const KEY_VALUE_PATTERN =
-  /\b(agent_id|target_agent_id|parent_agent_id|requester_id|sponsor_agent_id|chair_agent_id)=(?:"([^"]*)"|'([^']*)'|([^\s,}]+))/g
+  /\b(agent_id|target_agent_id|parent_agent_id|requester_id|sponsor_agent_id|chair_agent_id|child_agent_id|route_agent_id|scope_agent_id)=(?:"([^"]*)"|'([^']*)'|([^\s,}]+))/g
 
 type AgentReferenceField = (typeof AGENT_LOG_REFERENCE_FIELDS)[number]
 

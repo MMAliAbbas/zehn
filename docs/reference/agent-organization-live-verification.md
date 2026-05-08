@@ -32,6 +32,55 @@ Background refreshes keep the last visible content on screen. Initial loading
 and full-page error states are reserved for the first request before any usable
 snapshot or drill-down data has been loaded.
 
+## Command Center Behavior
+
+The Organization page is a read-only command center. Operators can select
+agents, change workbench tabs, filter visible logs, and drill into record
+summaries, but the page must not start, stop, retry, edit, delete, or publish
+delegations, meetings, gateway state, memory, configuration, GitHub artifacts,
+or Discord messages.
+
+On desktop, selecting an agent card keeps the organization canvas visible and
+opens the persistent Agent Workbench. On mobile, selecting a card opens the
+detail sheet. The selected card is visually marked and exposes `aria-pressed`.
+The Details button always opens Overview. Count pills act as shortcuts:
+
+- Inbox opens the Inbox workbench tab or detail tab.
+- Outbox opens the Outbox workbench tab or detail tab.
+- Meetings opens the Meetings workbench tab or detail tab.
+- Errors opens the Failures workbench tab or detail tab.
+
+The workbench tabs are Overview, Inbox, Outbox, Meetings, Failures, Recent
+Events, and Live Logs. Inbox, Outbox, and Meetings poll only while their tab is
+visible. Overview, Failures, Recent Events, and Live Logs use the already-loaded
+organization snapshot or the shared gateway log polling state.
+
+The command header summarizes the organization snapshot: active work,
+delegations, meetings, failures, hierarchy or flat mode, generated time,
+refreshed time, and query state. A background refresh error after data has
+loaded should show a stale query state without clearing the visible command
+center.
+
+The Recent Activity feed shows the newest organization-level structured
+activity and gateway events, capped to the newest entries. Delegations open the
+selected agent's Inbox, meetings open Meetings, failures open Failures, and
+gateway events open Recent Events. Failed delegations and failed meetings both
+appear as failure feed entries.
+
+The Live Logs tab uses incremental gateway log polling. `All Logs` shows the
+current buffered gateway lines. `Selected Agent` shows only lines with explicit
+agent reference fields, including `agent_id`, `target_agent_id`,
+`parent_agent_id`, `requester_id`, `sponsor_agent_id`, `chair_agent_id`,
+`child_agent_id`, `route_agent_id`, and `scope_agent_id`. Arbitrary message
+text, partial substrings, tokens, and sensitive-looking fields must not count
+as selected-agent references.
+
+The Failures tab shows the current failure when it is the newest relevant
+structured record. If newer activity exists, the tab labels the last failure as
+historical and keeps the newer current activity visible in Overview and Recent
+Events. Failure drilldown is limited to record type, record id, peer agent,
+role, status, created, updated, completed, and artifact references.
+
 ## Badge Meanings
 
 - `Idle`: the agent is configured and has no newer active or failed structured
@@ -93,6 +142,9 @@ curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/meetings"
 Expected result:
 
 - The page loads in flat mode when `agents.organization` is absent.
+- The command header shows zero active work, delegations, meetings, and
+  failures.
+- Desktop shows an empty Agent Workbench prompt until a card is selected.
 - The selected agent shows `Idle`.
 - Inbox, outbox, meetings, and errors are zero.
 - Drill-down tabs show empty record lists.
@@ -108,8 +160,15 @@ Expected result:
 
 - The target agent shows `Working`.
 - The requester shows `Delegating`.
+- Clicking the target card selects it in the persistent workbench on desktop or
+  opens the detail sheet on mobile.
+- The target Inbox count pill opens Inbox and shows the delegation ID.
+- The requester Outbox count pill opens Outbox and shows the same delegation ID.
 - The target inbox includes the delegation ID.
 - The requester outbox includes the same delegation ID.
+- The command header active work and delegation counts increase.
+- The Recent Activity feed includes the delegation and opens the related
+  agent's Inbox when clicked.
 - Raw prompts, provider messages, and private failure text are not present in
   the organization page or API responses.
 
@@ -121,6 +180,10 @@ Expected result:
 
 - Sponsor, chair, and participant show `Meeting`.
 - Each related agent's meeting drill-down includes the meeting ID.
+- The Meetings count pill opens the Meetings workbench tab or detail tab.
+- The command header active work and meeting counts increase.
+- The Recent Activity feed includes the meeting and opens the chair or related
+  agent's Meetings tab when clicked.
 - The chair remains the visible owner of the consolidated recommendation.
 - Raw meeting goals, notes, and participant turn text are not present in
   launcher API responses.
@@ -132,12 +195,18 @@ Create or retain a failed delegation or meeting record for a configured agent.
 Expected result:
 
 - The related agent shows `Failed`.
+- The command header failure count increases and uses the failure styling.
 - The failed record is selected as current when it is the newest relevant
   structured record.
+- The Errors count pill opens the Failures tab.
 - The errors count increases for the related agent.
 - If a newer running delegation, started meeting, or completed record exists
   for the same agent, the badge follows that newer current activity while the
   failed record remains visible as `last_failure`.
+- The Failures tab marks old failures as historical when newer current activity
+  exists.
+- Failed delegation and failed meeting records appear as failure entries in the
+  Recent Activity feed and open the Failures tab.
 - Failure details are redacted to record status and identifiers; private error
   strings do not appear in launcher responses.
 
@@ -164,12 +233,34 @@ as `agent_id`, `target_agent_id`, `parent_agent_id`, `chair_agent_id`, or
 Expected result:
 
 - Matching events appear under the selected agent's Recent Events tab.
+- Matching lines appear in Live Logs when the scope is `Selected Agent`; all
+  gateway lines remain visible when the scope is `All Logs`.
 - Malformed or unrelated log lines are ignored.
 - Agent matches come only from explicit key/value fields, not arbitrary message
   text or partial substrings.
 - Sensitive tokens and long messages are redacted or truncated.
 - Recent events do not change an otherwise `Idle`, `Working`, `Delegating`,
   `Meeting`, or `Failed` badge.
+
+### 7. Command Center Interaction Pass
+
+Run this pass once with each staged state above: no records, historical failure
+superseded by newer work, active delegation, active meeting, and gateway logs.
+
+Expected result:
+
+- Enter and Space on a focused agent card select the card without navigating
+  away from the Organization page.
+- The selected visual state follows the last selected card.
+- Details opens Overview.
+- Inbox, Outbox, Meetings, and Errors shortcut pills open their matching
+  workbench tabs on desktop and matching detail tabs on mobile.
+- Switching workbench tabs does not change records, config, gateway status, or
+  external artifacts.
+- Live Logs reports stopped, stale, or polling errors as panel state instead of
+  breaking the page.
+- The organization canvas, command header, activity feed, and selected
+  workbench remain usable after a background refresh.
 
 ## Read-Only Confirmation
 
@@ -196,8 +287,8 @@ new turns first or limit the comparison to config, `delegations`, and
 Run the task verification set after changing this area:
 
 ```bash
-go test ./web/backend/api ./pkg/agent ./pkg/config -run 'Agent|Organization|Activity|Inbox|Outbox|Meeting|Event' -count=1
-cd web/frontend && pnpm build
+go test ./web/backend/api ./pkg/agent ./pkg/config -run 'Agent|Organization|Activity|Inbox|Outbox|Meeting|Event|Failure' -count=1
+cd web/frontend && pnpm lint && pnpm build
 cd ../..
-operations/audit-zehn-feature-task.sh 030-agent-organization-live-verification
+operations/audit-zehn-feature-task.sh 043-organization-command-center-verification
 ```

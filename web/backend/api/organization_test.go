@@ -487,6 +487,58 @@ func TestHandleAgentOrganization_ActivityFeedSummarizesRecentOrgEvents(t *testin
 	}
 }
 
+func TestHandleAgentOrganization_ActivityFeedClassifiesMeetingFailuresAsFailures(t *testing.T) {
+	withIsolatedGatewayLogs(t)
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "sponsor", Name: "Sponsor"},
+			{ID: "chair", Name: "Chair"},
+			{ID: "participant", Name: "Participant"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	meeting, err := store.Started(context.Background(), agent.AgentMeetingRequest{
+		Title:               "Risk Review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+		Goal:                "private meeting failure goal must not leak",
+	})
+	if err != nil {
+		t.Fatalf("Started() error = %v", err)
+	}
+	if err := store.Failed(context.Background(), meeting.MeetingID, errors.New("private meeting failure details")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	for _, private := range []string{"private meeting failure goal", "private meeting failure details"} {
+		if strings.Contains(httpRec.Body.String(), private) {
+			t.Fatalf("response leaked private meeting failure content %q: %s", private, httpRec.Body.String())
+		}
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	if resp.Activity.FailureCount != 1 {
+		t.Fatalf("failure count = %d, want 1", resp.Activity.FailureCount)
+	}
+	if len(resp.Activity.Recent) != 1 {
+		t.Fatalf("recent feed = %+v, want one failed meeting entry", resp.Activity.Recent)
+	}
+	entry := resp.Activity.Recent[0]
+	if entry.Type != "failure" || entry.RecordID != meeting.MeetingID || entry.Status != string(agent.AgentMeetingStatusFailed) {
+		t.Fatalf("recent feed entry = %+v, want failed meeting classified as failure", entry)
+	}
+	if entry.AgentID != "chair" {
+		t.Fatalf("recent feed agent = %q, want chair", entry.AgentID)
+	}
+}
+
 func TestHandleAgentOrganization_RecentEventsIgnoreUnrelatedAndMalformedLogs(t *testing.T) {
 	withIsolatedGatewayLogs(t)
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {

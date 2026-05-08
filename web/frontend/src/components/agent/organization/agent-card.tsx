@@ -23,8 +23,13 @@ import { cn } from "@/lib/utils"
 
 import { AgentDetailSheet } from "./agent-detail-sheet"
 import { displayAgentName, summarizeActivity } from "./formatting"
+import { resolveActivityShortcut } from "./organization-state"
 import { CountPill, EmptyActivityLine, StatusBadge } from "./status-components"
-import type { AgentWorkbenchSection } from "./types"
+import type {
+  AgentActivityShortcut,
+  AgentDetailTab,
+  AgentWorkbenchSection,
+} from "./types"
 
 export function AgentCard({
   agent,
@@ -37,6 +42,8 @@ export function AgentCard({
 }) {
   const { t } = useTranslation()
   const [detailOpen, setDetailOpen] = useState(false)
+  const [detailInitialTab, setDetailInitialTab] =
+    useState<AgentDetailTab>("overview")
   const displayName = displayAgentName(agent)
   const activity = summarizeActivity(agent.activity.current, t)
   const selectAgent = () => onSelect(agent.id)
@@ -48,30 +55,37 @@ export function AgentCard({
   }
   const counts = [
     {
-      key: "inbox",
+      key: "inbox" as const,
       icon: IconInbox,
       label: t("pages.agent.organization.inbox", "Inbox"),
       value: agent.activity.inbox_count,
     },
     {
-      key: "outbox",
+      key: "outbox" as const,
       icon: IconSend,
       label: t("pages.agent.organization.outbox", "Outbox"),
       value: agent.activity.outbox_count,
     },
     {
-      key: "meetings",
+      key: "meetings" as const,
       icon: IconCalendarStats,
       label: t("pages.agent.organization.meetings", "Meetings"),
       value: agent.activity.meeting_count,
     },
     {
-      key: "errors",
+      key: "errors" as const,
       icon: IconAlertTriangle,
       label: t("pages.agent.organization.errors", "Errors"),
       value: agent.activity.failure_count,
     },
   ].filter((item) => item.value > 0)
+
+  const openActivityShortcut = (shortcut: AgentActivityShortcut) => {
+    const target = resolveActivityShortcut(shortcut)
+    onSelect(agent.id, target.workbenchSection)
+    setDetailInitialTab(target.detailTab)
+    setDetailOpen(true)
+  }
 
   return (
     <>
@@ -109,6 +123,7 @@ export function AgentCard({
               size="xs"
               onClick={(event) => {
                 event.stopPropagation()
+                setDetailInitialTab("overview")
                 setDetailOpen(true)
               }}
               onKeyDown={(event) => event.stopPropagation()}
@@ -134,6 +149,15 @@ export function AgentCard({
                   icon={item.icon}
                   label={item.label}
                   value={item.value}
+                  ariaLabel={t(
+                    "pages.agent.organization.activity_shortcut_label",
+                    "Open {{label}} for {{agent}}",
+                    { label: item.label, agent: displayName },
+                  )}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    openActivityShortcut(item.key)
+                  }}
                 />
               ))}
             </div>
@@ -150,6 +174,7 @@ export function AgentCard({
       <AgentDetailSheet
         agent={agent}
         open={detailOpen}
+        initialTab={detailInitialTab}
         onOpenChange={setDetailOpen}
       />
     </>

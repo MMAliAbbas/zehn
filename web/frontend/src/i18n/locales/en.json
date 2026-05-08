@@ -479,6 +479,7 @@
         "outbox": "Outbox",
         "details": "Details",
         "errors": "Errors",
+        "activity_shortcut_label": "Open {{label}} for {{agent}}",
         "no_activity": "No active records",
         "idle_summary": "Idle",
         "role_label": "Role",

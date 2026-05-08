@@ -1,9 +1,10 @@
 import { IconCircleCheck } from "@tabler/icons-react"
-import type { ComponentType, ReactNode } from "react"
+import type { ComponentType, MouseEventHandler, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { AgentOrganizationSnapshot } from "@/api/agents"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import { isProblemStatus } from "./formatting"
@@ -82,19 +83,46 @@ export function CountPill({
   icon: Icon,
   label,
   value,
+  ariaLabel,
+  onClick,
 }: {
   icon: ComponentType<{ className?: string }>
   label: string
   value: number
+  ariaLabel?: string
+  onClick?: MouseEventHandler<HTMLButtonElement>
 }) {
+  const content = (
+    <>
+      <Icon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="text-muted-foreground truncate">{label}</span>
+      <span className="font-medium">{value}</span>
+    </>
+  )
+
+  if (onClick) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="border-border/70 bg-muted/30 hover:bg-muted/70 focus-visible:ring-ring/50 h-6 max-w-full gap-1 border px-1.5"
+        title={`${label}: ${value}`}
+        aria-label={ariaLabel ?? `${label}: ${value}`}
+        onClick={onClick}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        {content}
+      </Button>
+    )
+  }
+
   return (
     <span
       className="border-border/70 bg-muted/30 inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-1.5 text-xs"
       title={`${label}: ${value}`}
     >
-      <Icon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="text-muted-foreground truncate">{label}</span>
-      <span className="font-medium">{value}</span>
+      {content}
     </span>
   )
 }

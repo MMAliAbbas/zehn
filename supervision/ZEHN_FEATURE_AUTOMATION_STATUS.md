@@ -1,6 +1,6 @@
 # Zehn Feature Automation Status
 
-Updated: 2026-05-09T00:19:49+05:00
+Updated: 2026-05-09T00:29:54+05:00
 
 This ledger is host-runner owned. A task is green only after its verification commands pass and related changes are reviewed according to the Zehn feature automation process.
 
@@ -43,9 +43,10 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 033-agent-organization-text-log-events | green | `runner-033-agent-organization-text-log-events-20260507072314.log` | host verified |
 | 034-agent-organization-frontend-decomposition | green | `runner-034-agent-organization-frontend-decomposition-20260507073202.log` | host verified |
 | 035-organization-command-center-state | green | `runner-035-organization-command-center-state-20260509001920.log` | host verified |
+| 036-organization-clickable-activity-shortcuts | green | `runner-036-organization-clickable-activity-shortcuts-20260509002518.log` | host verified |
 
-Total green: 35 / 43
+Total green: 36 / 43
 
 ## Not Green In This Ledger
 
-`036-organization-clickable-activity-shortcuts`, `037-organization-persistent-workbench`, `038-organization-live-log-panel`, `039-organization-agent-log-filtering`, `040-organization-global-activity-feed`, `041-organization-failure-drilldown`, `042-organization-command-header`, `043-organization-command-center-verification`
+`037-organization-persistent-workbench`, `038-organization-live-log-panel`, `039-organization-agent-log-filtering`, `040-organization-global-activity-feed`, `041-organization-failure-drilldown`, `042-organization-command-header`, `043-organization-command-center-verification`

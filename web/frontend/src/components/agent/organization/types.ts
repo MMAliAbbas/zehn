@@ -28,6 +28,8 @@ export type AgentDetailTab = Exclude<
   "failures" | "live-logs"
 >
 
+export type AgentActivityShortcut = "inbox" | "outbox" | "meetings" | "errors"
+
 export interface OrganizationSelectionState {
   selectedAgentID: string | null
   workbenchSection: AgentWorkbenchSection

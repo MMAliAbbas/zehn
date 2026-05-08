@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { AgentOrganizationAgent } from "@/api/agents"
@@ -29,15 +29,23 @@ import type { AgentDetailTab } from "./types"
 export function AgentDetailSheet({
   agent,
   open,
+  initialTab = "overview",
   onOpenChange,
 }: {
   agent: AgentOrganizationAgent
   open: boolean
+  initialTab?: AgentDetailTab
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useTranslation()
-  const [activeTab, setActiveTab] = useState<AgentDetailTab>("overview")
+  const [activeTab, setActiveTab] = useState<AgentDetailTab>(initialTab)
   const displayName = displayAgentName(agent)
+
+  useEffect(() => {
+    if (open) {
+      setActiveTab(initialTab)
+    }
+  }, [agent.id, initialTab, open])
 
   const inboxQuery = useQuery({
     queryKey: ["agents", agent.id, "inbox", AGENT_DETAIL_LIMIT],

@@ -1,4 +1,9 @@
-import type { AgentWorkbenchSection, OrganizationSelectionState } from "./types"
+import type {
+  AgentActivityShortcut,
+  AgentDetailTab,
+  AgentWorkbenchSection,
+  OrganizationSelectionState,
+} from "./types"
 
 export const DEFAULT_WORKBENCH_SECTION: AgentWorkbenchSection = "overview"
 
@@ -17,5 +22,24 @@ export function selectOrganizationAgent(
   return {
     selectedAgentID: agentID,
     workbenchSection: section,
+  }
+}
+
+export function resolveActivityShortcut(
+  shortcut: AgentActivityShortcut,
+): {
+  workbenchSection: AgentWorkbenchSection
+  detailTab: AgentDetailTab
+} {
+  if (shortcut === "errors") {
+    return {
+      workbenchSection: "failures",
+      detailTab: "recent",
+    }
+  }
+
+  return {
+    workbenchSection: shortcut,
+    detailTab: shortcut,
   }
 }

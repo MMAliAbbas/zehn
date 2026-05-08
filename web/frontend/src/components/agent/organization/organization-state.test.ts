@@ -6,6 +6,7 @@ import test from "node:test"
 import {
   createOrganizationSelectionState,
   DEFAULT_WORKBENCH_SECTION,
+  resolveActivityShortcut,
   selectOrganizationAgent,
 } from "./organization-state.ts"
 import { AGENT_WORKBENCH_SECTIONS } from "./types.ts"
@@ -53,4 +54,26 @@ test("declares all planned organization workbench sections", () => {
     "recent",
     "live-logs",
   ])
+})
+
+test("resolves activity shortcuts to deterministic visible detail tabs", () => {
+  assert.deepEqual(resolveActivityShortcut("inbox"), {
+    workbenchSection: "inbox",
+    detailTab: "inbox",
+  })
+  assert.deepEqual(resolveActivityShortcut("outbox"), {
+    workbenchSection: "outbox",
+    detailTab: "outbox",
+  })
+  assert.deepEqual(resolveActivityShortcut("meetings"), {
+    workbenchSection: "meetings",
+    detailTab: "meetings",
+  })
+})
+
+test("resolves error shortcuts to the failures workbench with recent events as the visible fallback", () => {
+  assert.deepEqual(resolveActivityShortcut("errors"), {
+    workbenchSection: "failures",
+    detailTab: "recent",
+  })
 })

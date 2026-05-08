@@ -479,6 +479,7 @@
         "outbox": "发件箱",
         "details": "详情",
         "errors": "错误",
+        "activity_shortcut_label": "打开 {{agent}} 的{{label}}",
         "no_activity": "没有活动记录",
         "idle_summary": "空闲",
         "role_label": "角色",

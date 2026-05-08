@@ -7,7 +7,6 @@ import {
   IconSend,
 } from "@tabler/icons-react"
 import { useEffect, useState } from "react"
-import type { KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { AgentOrganizationAgent } from "@/api/agents"
@@ -23,10 +22,12 @@ import { cn } from "@/lib/utils"
 
 import { AgentDetailSheet } from "./agent-detail-sheet"
 import { displayAgentName, summarizeActivity } from "./formatting"
-import { resolveActivityShortcut } from "./organization-state"
+import {
+  type AgentCardShortcut,
+  resolveAgentCardShortcut,
+} from "./organization-state"
 import { CountPill, EmptyActivityLine, StatusBadge } from "./status-components"
 import type {
-  AgentActivityShortcut,
   AgentDetailTab,
   AgentWorkbenchSection,
 } from "./types"
@@ -52,12 +53,6 @@ export function AgentCard({
     if (!desktopWorkbench) {
       setDetailInitialTab("overview")
       setDetailOpen(true)
-    }
-  }
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault()
-      selectAgent()
     }
   }
   const counts = [
@@ -87,8 +82,8 @@ export function AgentCard({
     },
   ].filter((item) => item.value > 0)
 
-  const openActivityShortcut = (shortcut: AgentActivityShortcut) => {
-    const target = resolveActivityShortcut(shortcut)
+  const openCardShortcut = (shortcut: AgentCardShortcut) => {
+    const target = resolveAgentCardShortcut(shortcut)
     onSelect(agent.id, target.workbenchSection)
     setDetailInitialTab(target.detailTab)
     if (!desktopWorkbench) {
@@ -101,18 +96,33 @@ export function AgentCard({
       <Card
         size="sm"
         className={cn(
-          "min-w-0 cursor-pointer rounded-lg py-3 transition-colors",
+          "relative min-w-0 rounded-lg py-3 transition-colors",
           selected
             ? "bg-primary/5 ring-primary/40"
-            : "hover:bg-muted/40 focus-visible:ring-ring/50",
+            : "has-focus-visible:ring-ring/50",
         )}
-        role="button"
-        tabIndex={0}
-        aria-pressed={selected}
-        onClick={selectAgent}
-        onKeyDown={handleKeyDown}
       >
-        <CardHeader className="grid-cols-[minmax(0,1fr)_auto] gap-3 px-3">
+        <button
+          type="button"
+          className={cn(
+            "focus-visible:ring-ring/50 absolute inset-0 z-0 rounded-lg text-left transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
+            !selected && "hover:bg-muted/40",
+          )}
+          aria-pressed={selected}
+          aria-label={t(
+            "pages.agent.organization.select_agent",
+            "Select {{agent}}",
+            { agent: displayName },
+          )}
+          onClick={selectAgent}
+        >
+          <span className="sr-only">
+            {t("pages.agent.organization.select_agent", "Select {{agent}}", {
+              agent: displayName,
+            })}
+          </span>
+        </button>
+        <CardHeader className="pointer-events-none relative z-10 grid-cols-[minmax(0,1fr)_auto] gap-3 px-3">
           <CardTitle className="min-w-0">
             <div className="truncate text-sm leading-5" title={displayName}>
               {displayName}
@@ -124,28 +134,26 @@ export function AgentCard({
               {agent.id}
             </div>
           </CardTitle>
-          <CardAction className="flex items-center gap-1.5">
+          <CardAction className="pointer-events-none flex items-center gap-1.5">
             <StatusBadge status={agent.status} />
             <Button
               type="button"
               variant="outline"
               size="xs"
-              onClick={(event) => {
-                event.stopPropagation()
-                onSelect(agent.id, "overview")
-                setDetailInitialTab("overview")
-                if (!desktopWorkbench) {
-                  setDetailOpen(true)
-                }
-              }}
-              onKeyDown={(event) => event.stopPropagation()}
+              className="pointer-events-auto"
+              aria-label={t(
+                "pages.agent.organization.details_shortcut_label",
+                "Open Details for {{agent}}",
+                { agent: displayName },
+              )}
+              onClick={() => openCardShortcut("details")}
             >
               <IconInfoCircle />
               {t("pages.agent.organization.details", "Details")}
             </Button>
           </CardAction>
         </CardHeader>
-        <CardContent className="space-y-2 px-3">
+        <CardContent className="pointer-events-none relative z-10 space-y-2 px-3">
           <div
             className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs"
             title={activity}
@@ -154,7 +162,7 @@ export function AgentCard({
             <span className="truncate">{activity}</span>
           </div>
           {counts.length > 0 ? (
-            <div className="flex min-w-0 flex-wrap gap-1.5">
+            <div className="pointer-events-auto flex min-w-0 flex-wrap gap-1.5">
               {counts.map((item) => (
                 <CountPill
                   key={item.key}
@@ -166,10 +174,7 @@ export function AgentCard({
                     "Open {{label}} for {{agent}}",
                     { label: item.label, agent: displayName },
                   )}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    openActivityShortcut(item.key)
-                  }}
+                  onClick={() => openCardShortcut(item.key)}
                 />
               ))}
             </div>

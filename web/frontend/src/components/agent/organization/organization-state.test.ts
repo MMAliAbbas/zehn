@@ -8,6 +8,7 @@ import {
   createOrganizationSelectionState,
   detailTabForWorkbenchSection,
   resolveActivityShortcut,
+  resolveAgentCardShortcut,
   resolveSelectedOrganizationAgent,
   selectOrganizationAgent,
 } from "./organization-state.ts"
@@ -75,6 +76,29 @@ test("resolves activity shortcuts to deterministic visible detail tabs", () => {
 
 test("resolves error shortcuts directly to the failures detail tab", () => {
   assert.deepEqual(resolveActivityShortcut("errors"), {
+    workbenchSection: "failures",
+    detailTab: "failures",
+  })
+})
+
+test("resolves card shortcuts to their independently focusable destinations", () => {
+  assert.deepEqual(resolveAgentCardShortcut("details"), {
+    workbenchSection: "overview",
+    detailTab: "overview",
+  })
+  assert.deepEqual(resolveAgentCardShortcut("inbox"), {
+    workbenchSection: "inbox",
+    detailTab: "inbox",
+  })
+  assert.deepEqual(resolveAgentCardShortcut("outbox"), {
+    workbenchSection: "outbox",
+    detailTab: "outbox",
+  })
+  assert.deepEqual(resolveAgentCardShortcut("meetings"), {
+    workbenchSection: "meetings",
+    detailTab: "meetings",
+  })
+  assert.deepEqual(resolveAgentCardShortcut("errors"), {
     workbenchSection: "failures",
     detailTab: "failures",
   })

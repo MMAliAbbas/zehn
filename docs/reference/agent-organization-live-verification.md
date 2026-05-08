@@ -262,10 +262,13 @@ superseded by newer work, active delegation, active meeting, and gateway logs.
 
 Expected result:
 
-- Enter and Space on a focused agent card select the card without navigating
-  away from the Organization page.
+- Each agent card exposes a focused card-selection control followed by separate
+  focused shortcut controls. Tab order must not trap focus or place shortcut
+  controls inside another interactive control.
+- Enter and Space on the focused card-selection control select the card without
+  navigating away from the Organization page.
 - The selected visual state follows the last selected card.
-- Details opens Overview.
+- Details is independently focusable and opens Overview.
 - Inbox, Outbox, Meetings, and Errors shortcut pills open their matching
   workbench tabs on desktop and matching detail tabs on mobile.
 - Switching workbench tabs does not change records, config, gateway status, or

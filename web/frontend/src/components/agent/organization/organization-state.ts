@@ -12,6 +12,7 @@ import type {
 } from "./types"
 
 export const DEFAULT_WORKBENCH_SECTION: AgentWorkbenchSection = "overview"
+export type AgentCardShortcut = "details" | AgentActivityShortcut
 
 export function createOrganizationSelectionState(): OrganizationSelectionState {
   return {
@@ -46,6 +47,20 @@ export function resolveActivityShortcut(shortcut: AgentActivityShortcut): {
     workbenchSection: shortcut,
     detailTab: shortcut,
   }
+}
+
+export function resolveAgentCardShortcut(shortcut: AgentCardShortcut): {
+  workbenchSection: AgentWorkbenchSection
+  detailTab: AgentDetailTab
+} {
+  if (shortcut === "details") {
+    return {
+      workbenchSection: "overview",
+      detailTab: "overview",
+    }
+  }
+
+  return resolveActivityShortcut(shortcut)
 }
 
 export function detailTabForWorkbenchSection(

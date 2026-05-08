@@ -187,7 +187,7 @@ assert_scoped_changes() {
   } | sort -u)
 
   bad=()
-  for rel in "${changed[@]}"; do
+  for rel in ${changed[@]+"${changed[@]}"}; do
     [ -n "$rel" ] || continue
     ok=0
     for item in "${allowed[@]}"; do
@@ -212,7 +212,7 @@ assert_scoped_changes() {
 
   if [ "${#bad[@]}" -gt 0 ]; then
     printf 'Unscoped changes detected:\n'
-    printf 'UNSCOPED %s\n' "${bad[@]}"
+    printf 'UNSCOPED %s\n' ${bad[@]+"${bad[@]}"}
     return 1
   fi
 }
@@ -231,7 +231,7 @@ assert_staged_changes_scoped() {
   done < <(git -C "$ROOT" diff --cached --name-only | sort -u)
 
   bad=()
-  for rel in "${staged[@]}"; do
+  for rel in ${staged[@]+"${staged[@]}"}; do
     [ -n "$rel" ] || continue
     ok=0
     for item in "${allowed[@]}"; do
@@ -256,7 +256,7 @@ assert_staged_changes_scoped() {
 
   if [ "${#bad[@]}" -gt 0 ]; then
     printf 'Unscoped staged changes detected:\n'
-    printf 'UNSCOPED-STAGED %s\n' "${bad[@]}"
+    printf 'UNSCOPED-STAGED %s\n' ${bad[@]+"${bad[@]}"}
     return 1
   fi
 }
@@ -432,7 +432,7 @@ commit_changes() {
           matches+=("$path")
         done < <(git -C "$ROOT" ls-files --modified --deleted --others --exclude-standard -- "$item")
         if [ "${#matches[@]}" -gt 0 ]; then
-          git -C "$ROOT" add -- "${matches[@]}" || return 1
+      git -C "$ROOT" add -- ${matches[@]+"${matches[@]}"} || return 1
         fi
         ;;
       *)

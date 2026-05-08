@@ -42,9 +42,10 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 032-agent-organization-live-refresh | green | `runner-032-agent-organization-live-refresh-20260507071507.log` | host verified |
 | 033-agent-organization-text-log-events | green | `runner-033-agent-organization-text-log-events-20260507072314.log` | host verified |
 | 034-agent-organization-frontend-decomposition | green | `runner-034-agent-organization-frontend-decomposition-20260507073202.log` | host verified |
+| 035-organization-command-center-state | green | `manual-035-organization-command-center-state-20260509001000` | host verified after malformed verification block repair |
 
-Total green: 34 / 34
+Total green: 35 / 43
 
 ## Not Green In This Ledger
 
-All Zehn feature tasks have host-runner green evidence.
+`036-organization-clickable-activity-shortcuts`, `037-organization-persistent-workbench`, `038-organization-live-log-panel`, `039-organization-agent-log-filtering`, `040-organization-global-activity-feed`, `041-organization-failure-drilldown`, `042-organization-command-header`, `043-organization-command-center-verification`

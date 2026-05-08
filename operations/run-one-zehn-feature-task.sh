@@ -24,6 +24,8 @@ AUTO_COMMIT=0
 RETRY_FAILED=0
 CODEX_TIMEOUT="${CODEX_TIMEOUT:-7200}"
 RUN_LOG=""
+TEE_PID=""
+TEE_FIFO=""
 
 usage() {
   cat <<'USAGE'
@@ -141,6 +143,19 @@ acquire_lock() {
 
 release_lock() {
   rm -f "$LOCK_FILE"
+}
+
+start_runner_log_tee() {
+  TEE_FIFO="$RUN_DIR/runner-tee-$$.fifo"
+  if mkfifo "$TEE_FIFO"; then
+    tee -a "$RUN_LOG" < "$TEE_FIFO" &
+    TEE_PID="$!"
+    exec > "$TEE_FIFO" 2>&1
+    rm -f "$TEE_FIFO"
+  else
+    log "warning: failed to create log tee fifo; appending output only to $RUN_LOG"
+    exec >> "$RUN_LOG" 2>&1
+  fi
 }
 
 assert_repo_clean() {
@@ -464,6 +479,9 @@ cleanup() {
   if [ "$code" -ne 0 ] && [ -n "$TASK" ] && [ -n "$RUN_LOG" ]; then
     record_failure_status "$code" || true
   fi
+  if [ -n "$TEE_FIFO" ]; then
+    rm -f "$TEE_FIFO"
+  fi
   release_lock
   exit "$code"
 }
@@ -499,7 +517,7 @@ EOF
   fi
 
   touch "$RUN_LOG" || die "cannot write runner log: $RUN_LOG"
-  exec > >(tee -a "$RUN_LOG") 2>&1
+  start_runner_log_tee
   log "runner log: $RUN_LOG"
   log "selected task: $TASK"
 

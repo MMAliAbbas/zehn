@@ -68,8 +68,13 @@ gateway events open Recent Events. Failed delegations and failed meetings both
 appear as failure feed entries.
 
 The Live Logs tab uses incremental gateway log polling. `All Logs` shows the
-current buffered gateway lines. `Selected Agent` shows only lines with explicit
-agent reference fields, including `agent_id`, `target_agent_id`,
+current browser-retained gateway lines. The browser buffer is capped to the
+newest 2,000 lines so a long-running Organization page cannot grow memory
+without bound. Incremental polling still follows the gateway-reported total log
+offset after older visible lines are discarded, so operators should use the
+gateway's source logs or captured artifacts when reviewing lines older than the
+live buffer. `Selected Agent` shows only lines with explicit agent reference
+fields, including `agent_id`, `target_agent_id`,
 `parent_agent_id`, `requester_id`, `sponsor_agent_id`, `chair_agent_id`,
 `child_agent_id`, `route_agent_id`, and `scope_agent_id`. Arbitrary message
 text, partial substrings, tokens, and sensitive-looking fields must not count

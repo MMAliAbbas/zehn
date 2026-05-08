@@ -9,6 +9,7 @@ const POLLABLE_GATEWAY_STATES = new Set<GatewayState>([
 ])
 
 export const GATEWAY_LOGS_STALE_AFTER_MS = 5000
+export const GATEWAY_LOGS_MAX_RETAINED_LINES = 2000
 
 export interface GatewayLogsState {
   logs: string[]
@@ -44,13 +45,14 @@ export function applyGatewayLogsResponse(
   state: GatewayLogsState,
   data: GatewayLogsResponse,
   now = state.lastUpdatedAt,
+  maxRetainedLines = GATEWAY_LOGS_MAX_RETAINED_LINES,
 ): GatewayLogsState {
   const nextRunID = data.log_run_id ?? state.logRunID
   const nextLogs = data.logs ?? []
 
   if (nextRunID !== state.logRunID) {
     return {
-      logs: nextLogs,
+      logs: retainNewestGatewayLogLines(nextLogs, maxRetainedLines),
       logOffset: data.log_total ?? nextLogs.length,
       logRunID: nextRunID,
       error: null,
@@ -67,12 +69,22 @@ export function applyGatewayLogsResponse(
   }
 
   return {
-    logs: [...state.logs, ...nextLogs],
+    logs: retainNewestGatewayLogLines(
+      [...state.logs, ...nextLogs],
+      maxRetainedLines,
+    ),
     logOffset: data.log_total ?? state.logOffset + nextLogs.length,
     logRunID: state.logRunID,
     error: null,
     lastUpdatedAt: now,
   }
+}
+
+function retainNewestGatewayLogLines(logs: string[], maxRetainedLines: number) {
+  if (logs.length <= maxRetainedLines) {
+    return logs
+  }
+  return logs.slice(-maxRetainedLines)
 }
 
 export function applyGatewayLogsError(

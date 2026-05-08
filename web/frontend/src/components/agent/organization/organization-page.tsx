@@ -4,7 +4,7 @@ import {
   IconNetwork,
 } from "@tabler/icons-react"
 import { useQuery } from "@tanstack/react-query"
-import { useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { getAgentOrganization } from "@/api/agents"
@@ -12,11 +12,17 @@ import { PageHeader } from "@/components/page-header"
 
 import { ORGANIZATION_REFRESH_INTERVAL_MS } from "./constants"
 import { buildOrderedRoots } from "./formatting"
+import {
+  createOrganizationSelectionState,
+  selectOrganizationAgent,
+} from "./organization-state"
 import { OrganizationBranch } from "./organization-tree"
 import { SnapshotSummary, StatePanel } from "./status-components"
+import type { AgentWorkbenchSection } from "./types"
 
 export function OrganizationPage() {
   const { t } = useTranslation()
+  const [selection, setSelection] = useState(createOrganizationSelectionState)
   const organizationQuery = useQuery({
     queryKey: ["agents", "organization"],
     queryFn: getAgentOrganization,
@@ -26,6 +32,15 @@ export function OrganizationPage() {
   const roots = useMemo(
     () => buildOrderedRoots(organizationQuery.data),
     [organizationQuery.data],
+  )
+
+  const handleSelectAgent = useCallback(
+    (agentID: string, section?: AgentWorkbenchSection) => {
+      setSelection((current) =>
+        selectOrganizationAgent(current, agentID, section),
+      )
+    },
+    [],
   )
 
   return (
@@ -80,7 +95,13 @@ export function OrganizationPage() {
               <SnapshotSummary snapshot={organizationQuery.data} />
               <div className="space-y-3">
                 {roots.map((node) => (
-                  <OrganizationBranch key={node.id} node={node} depth={0} />
+                  <OrganizationBranch
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    selectedAgentID={selection.selectedAgentID}
+                    onSelectAgent={handleSelectAgent}
+                  />
                 ))}
               </div>
             </section>

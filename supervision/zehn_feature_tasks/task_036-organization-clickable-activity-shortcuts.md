@@ -47,7 +47,7 @@ the selected agent workbench.
 
 ```bash
 cd /Users/aliai/zehn
-go test ./web/backend/api -run "^  -count=1
+go test ./web/backend/api -run 'Agent|Organization|Activity|Inbox|Outbox|Meeting|Event' -count=1
 cd /Users/aliai/zehn/web/frontend
 pnpm lint
 pnpm build

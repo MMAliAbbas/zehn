@@ -1,12 +1,16 @@
 import { AgentCard } from "./agent-card"
-import type { OrderedNode } from "./types"
+import type { AgentWorkbenchSection, OrderedNode } from "./types"
 
 export function OrganizationBranch({
   node,
   depth,
+  selectedAgentID,
+  onSelectAgent,
 }: {
   node: OrderedNode
   depth: number
+  selectedAgentID: string | null
+  onSelectAgent: (agentID: string, section?: AgentWorkbenchSection) => void
 }) {
   const levels = buildLevels(node)
 
@@ -19,7 +23,12 @@ export function OrganizationBranch({
         >
           <div className={gridClassForLevel(index + depth, level.length)}>
             {level.map((levelNode) => (
-              <AgentCard key={levelNode.id} agent={levelNode} />
+              <AgentCard
+                key={levelNode.id}
+                agent={levelNode}
+                selected={levelNode.id === selectedAgentID}
+                onSelect={onSelectAgent}
+              />
             ))}
           </div>
         </div>

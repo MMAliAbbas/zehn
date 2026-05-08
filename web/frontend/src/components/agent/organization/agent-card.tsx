@@ -7,6 +7,7 @@ import {
   IconSend,
 } from "@tabler/icons-react"
 import { useState } from "react"
+import type { KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { AgentOrganizationAgent } from "@/api/agents"
@@ -18,16 +19,33 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 
 import { AgentDetailSheet } from "./agent-detail-sheet"
 import { displayAgentName, summarizeActivity } from "./formatting"
 import { CountPill, EmptyActivityLine, StatusBadge } from "./status-components"
+import type { AgentWorkbenchSection } from "./types"
 
-export function AgentCard({ agent }: { agent: AgentOrganizationAgent }) {
+export function AgentCard({
+  agent,
+  selected,
+  onSelect,
+}: {
+  agent: AgentOrganizationAgent
+  selected: boolean
+  onSelect: (agentID: string, section?: AgentWorkbenchSection) => void
+}) {
   const { t } = useTranslation()
   const [detailOpen, setDetailOpen] = useState(false)
   const displayName = displayAgentName(agent)
   const activity = summarizeActivity(agent.activity.current, t)
+  const selectAgent = () => onSelect(agent.id)
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault()
+      selectAgent()
+    }
+  }
   const counts = [
     {
       key: "inbox",
@@ -57,7 +75,20 @@ export function AgentCard({ agent }: { agent: AgentOrganizationAgent }) {
 
   return (
     <>
-      <Card size="sm" className="min-w-0 rounded-lg py-3">
+      <Card
+        size="sm"
+        className={cn(
+          "min-w-0 cursor-pointer rounded-lg py-3 transition-colors",
+          selected
+            ? "bg-primary/5 ring-primary/40"
+            : "hover:bg-muted/40 focus-visible:ring-ring/50",
+        )}
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected}
+        onClick={selectAgent}
+        onKeyDown={handleKeyDown}
+      >
         <CardHeader className="grid-cols-[minmax(0,1fr)_auto] gap-3 px-3">
           <CardTitle className="min-w-0">
             <div className="truncate text-sm leading-5" title={displayName}>
@@ -76,7 +107,11 @@ export function AgentCard({ agent }: { agent: AgentOrganizationAgent }) {
               type="button"
               variant="outline"
               size="xs"
-              onClick={() => setDetailOpen(true)}
+              onClick={(event) => {
+                event.stopPropagation()
+                setDetailOpen(true)
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
             >
               <IconInfoCircle />
               {t("pages.agent.organization.details", "Details")}

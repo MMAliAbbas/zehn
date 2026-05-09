@@ -58,5 +58,5 @@ function gridClassForLevel(depth: number, itemCount: number): string {
     return "grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2"
   }
 
-  return "grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-4"
+  return "grid min-w-0 gap-2 md:grid-cols-2 xl:grid-cols-3"
 }

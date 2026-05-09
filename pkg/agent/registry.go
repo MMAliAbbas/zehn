@@ -239,6 +239,11 @@ func (r *AgentRegistry) Close() {
 func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	for _, agent := range r.agents {
+		if agent != nil && agent.Default {
+			return agent
+		}
+	}
 	if agent, ok := r.agents["main"]; ok {
 		return agent
 	}

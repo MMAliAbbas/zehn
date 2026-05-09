@@ -161,10 +161,28 @@ func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
 	})
 	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
 
-	// GetDefaultAgent first checks for "main", then returns any
 	agent := registry.GetDefaultAgent()
 	if agent == nil {
 		t.Fatal("expected a default agent")
+	}
+	if agent.ID != "beta" {
+		t.Fatalf("default agent ID = %q, want beta", agent.ID)
+	}
+}
+
+func TestAgentRegistry_GetDefaultAgentPrefersExplicitDefaultOverMain(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "main"},
+		{ID: "zehn-main", Default: true},
+	})
+	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
+
+	agent := registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected a default agent")
+	}
+	if agent.ID != "zehn-main" {
+		t.Fatalf("default agent ID = %q, want zehn-main", agent.ID)
 	}
 }
 

@@ -5,11 +5,14 @@ import test from "node:test"
 
 import {
   DEFAULT_WORKBENCH_SECTION,
+  clearSelectedOrganizationRecord,
   createOrganizationSelectionState,
   detailTabForWorkbenchSection,
+  resolveSelectableActivityRecord,
   resolveActivityShortcut,
   resolveAgentCardShortcut,
   resolveSelectedOrganizationAgent,
+  selectOrganizationActivityRecord,
   selectOrganizationAgent,
 } from "./organization-state.ts"
 import { AGENT_WORKBENCH_SECTIONS } from "./types.ts"
@@ -18,6 +21,7 @@ test("creates empty organization selection state with overview workbench", () =>
   assert.deepEqual(createOrganizationSelectionState(), {
     selectedAgentID: null,
     workbenchSection: DEFAULT_WORKBENCH_SECTION,
+    selectedRecord: null,
   })
 })
 
@@ -25,11 +29,13 @@ test("selects an agent while preserving the current workbench section by default
   const current = {
     selectedAgentID: "li-cto",
     workbenchSection: "meetings" as const,
+    selectedRecord: null,
   }
 
   assert.deepEqual(selectOrganizationAgent(current, "li-engineering"), {
     selectedAgentID: "li-engineering",
     workbenchSection: "meetings",
+    selectedRecord: null,
   })
 })
 
@@ -43,8 +49,70 @@ test("selects an agent and records an explicit workbench section", () => {
     {
       selectedAgentID: "li-cro",
       workbenchSection: "outbox",
+      selectedRecord: null,
     },
   )
+})
+
+test("selects an activity record and moves the workbench to its source section", () => {
+  const current = selectOrganizationAgent(
+    createOrganizationSelectionState(),
+    "li-engineering",
+    "overview",
+  )
+
+  assert.deepEqual(
+    selectOrganizationActivityRecord(current, {
+      type: "delegation",
+      recordID: "delegation-123",
+      sourceSection: "failures",
+      title: "Current failure",
+    }),
+    {
+      selectedAgentID: "li-engineering",
+      workbenchSection: "failures",
+      selectedRecord: {
+        type: "delegation",
+        recordID: "delegation-123",
+        sourceSection: "failures",
+        title: "Current failure",
+      },
+    },
+  )
+})
+
+test("clears the selected activity record without changing the selected agent or section", () => {
+  const current = selectOrganizationActivityRecord(
+    selectOrganizationAgent(
+      createOrganizationSelectionState(),
+      "li-engineering",
+      "inbox",
+    ),
+    {
+      type: "delegation",
+      recordID: "delegation-123",
+      sourceSection: "inbox",
+    },
+  )
+
+  assert.deepEqual(clearSelectedOrganizationRecord(current), {
+    selectedAgentID: "li-engineering",
+    workbenchSection: "inbox",
+    selectedRecord: null,
+  })
+})
+
+test("only resolves selectable activity records when detail inspection is available", () => {
+  const record = {
+    type: "meeting",
+    recordID: "meeting-123",
+    sourceSection: "meetings" as const,
+    title: "Planning meeting",
+  }
+
+  assert.equal(resolveSelectableActivityRecord(record, false), null)
+  assert.equal(resolveSelectableActivityRecord(record, undefined), null)
+  assert.deepEqual(resolveSelectableActivityRecord(record, true), record)
 })
 
 test("declares all planned organization workbench sections", () => {

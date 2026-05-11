@@ -16,6 +16,7 @@ import { buildOrderedRoots } from "./formatting"
 import {
   createOrganizationSelectionState,
   resolveSelectedOrganizationAgent,
+  selectOrganizationActivityRecord,
   selectOrganizationAgent,
 } from "./organization-state"
 import { OrganizationBranch } from "./organization-tree"
@@ -24,7 +25,7 @@ import {
   OrganizationCommandHeader,
   StatePanel,
 } from "./status-components"
-import type { AgentWorkbenchSection } from "./types"
+import type { AgentSelectedActivityRecord, AgentWorkbenchSection } from "./types"
 
 export function OrganizationPage() {
   const { t } = useTranslation()
@@ -61,7 +62,18 @@ export function OrganizationPage() {
       setSelection((current) => ({
         ...current,
         workbenchSection: section,
+        selectedRecord: null,
       }))
+    },
+    [],
+  )
+  const handleSelectedRecordChange = useCallback(
+    (record: AgentSelectedActivityRecord | null) => {
+      setSelection((current) =>
+        record
+          ? selectOrganizationActivityRecord(current, record)
+          : { ...current, selectedRecord: null },
+      )
     },
     [],
   )
@@ -140,7 +152,9 @@ export function OrganizationPage() {
                 <AgentWorkbench
                   agent={selectedAgent}
                   activeSection={selection.workbenchSection}
+                  selectedRecord={selection.selectedRecord}
                   onSectionChange={handleWorkbenchSectionChange}
+                  onSelectedRecordChange={handleSelectedRecordChange}
                 />
               </div>
             </section>

@@ -7,6 +7,7 @@ import type {
 import type {
   AgentActivityShortcut,
   AgentDetailTab,
+  AgentSelectedActivityRecord,
   AgentWorkbenchSection,
   OrganizationSelectionState,
 } from "./types"
@@ -18,6 +19,7 @@ export function createOrganizationSelectionState(): OrganizationSelectionState {
   return {
     selectedAgentID: null,
     workbenchSection: DEFAULT_WORKBENCH_SECTION,
+    selectedRecord: null,
   }
 }
 
@@ -29,7 +31,35 @@ export function selectOrganizationAgent(
   return {
     selectedAgentID: agentID,
     workbenchSection: section,
+    selectedRecord: null,
   }
+}
+
+export function selectOrganizationActivityRecord(
+  current: OrganizationSelectionState,
+  record: AgentSelectedActivityRecord,
+): OrganizationSelectionState {
+  return {
+    ...current,
+    workbenchSection: record.sourceSection,
+    selectedRecord: record,
+  }
+}
+
+export function clearSelectedOrganizationRecord(
+  current: OrganizationSelectionState,
+): OrganizationSelectionState {
+  return {
+    ...current,
+    selectedRecord: null,
+  }
+}
+
+export function resolveSelectableActivityRecord(
+  record: AgentSelectedActivityRecord,
+  detailAvailable?: boolean,
+): AgentSelectedActivityRecord | null {
+  return detailAvailable === true ? record : null
 }
 
 export function resolveActivityShortcut(shortcut: AgentActivityShortcut): {

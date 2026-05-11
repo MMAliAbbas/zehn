@@ -1,15 +1,24 @@
-import type { UseQueryResult } from "@tanstack/react-query"
+import { IconListDetails, IconX } from "@tabler/icons-react"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type {
+  AgentOrganizationActivityDetail,
   AgentDelegationActivityRecord,
   AgentMeetingActivityRecord,
   AgentOrganizationActivityRecord,
   AgentOrganizationAgent,
   AgentOrganizationRecentEvent,
 } from "@/api/agents"
-import { getAgentFailures, getAgentInbox, getAgentMeetings } from "@/api/agents"
+import {
+  ApiRequestError,
+  getAgentActivityDetail,
+  getAgentFailures,
+  getAgentInbox,
+  getAgentMeetings,
+} from "@/api/agents"
 import { LogsPanel } from "@/components/logs/logs-panel"
 import { Button } from "@/components/ui/button"
 import { useGatewayLogs } from "@/hooks/use-gateway-logs"
@@ -32,6 +41,7 @@ import {
   shortRecordID,
   summarizeActivity,
 } from "./formatting"
+import { resolveSelectableActivityRecord } from "./organization-state"
 import {
   ActivityRecordFrame,
   ArtifactSummary,
@@ -39,6 +49,7 @@ import {
   TabState,
 } from "./record-components"
 import { StatusBadge } from "./status-components"
+import type { AgentSelectedActivityRecord } from "./types"
 
 export function AgentOverviewPanel({
   agent,
@@ -219,14 +230,438 @@ export function LiveLogsPanel({ agent }: { agent: AgentOrganizationAgent }) {
   )
 }
 
+export function ActivityRecordDetailPanel({
+  agentID,
+  selectedRecord,
+  onClear,
+}: {
+  agentID: string
+  selectedRecord: AgentSelectedActivityRecord | null
+  onClear: () => void
+}) {
+  const { t } = useTranslation()
+  const detailQuery = useQuery({
+    queryKey: [
+      "agents",
+      agentID,
+      "activity-detail",
+      selectedRecord?.type,
+      selectedRecord?.recordID,
+    ],
+    queryFn: () =>
+      getAgentActivityDetail(
+        agentID,
+        selectedRecord?.type ?? "",
+        selectedRecord?.recordID ?? "",
+      ),
+    enabled: Boolean(selectedRecord),
+  })
+
+  if (!selectedRecord) {
+    return null
+  }
+
+  const title =
+    selectedRecord.title ||
+    t("pages.agent.organization.detail.record_details", "Record details")
+
+  return (
+    <div className="mb-4 rounded-lg border border-border/70 bg-muted/10">
+      <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border/70 px-3 py-3">
+        <div className="min-w-0">
+          <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+            {t(
+              "pages.agent.organization.detail.selected_record",
+              "Selected record",
+            )}
+          </div>
+          <div className="mt-0.5 truncate text-sm font-medium">{title}</div>
+          <div className="text-muted-foreground mt-0.5 truncate font-mono text-xs">
+            {selectedRecord.recordID}
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t(
+            "pages.agent.organization.detail.close_record_details",
+            "Close record details",
+          )}
+          onClick={onClear}
+        >
+          <IconX className="size-4" />
+        </Button>
+      </div>
+      <div className="space-y-3 px-3 py-3">
+        {detailQuery.isLoading ? (
+          <TabState
+            loading
+            title={t(
+              "pages.agent.organization.detail.loading_record_details",
+              "Loading record details",
+            )}
+          />
+        ) : detailQuery.error ? (
+          <TabState
+            destructive
+            title={recordDetailErrorTitle(detailQuery.error, t)}
+            detail={errorMessage(detailQuery.error)}
+          />
+        ) : detailQuery.data ? (
+          <ActivityRecordDetailContent detail={detailQuery.data} />
+        ) : (
+          <TabState
+            title={t(
+              "pages.agent.organization.detail.no_record_details",
+              "No record details",
+            )}
+            detail={t(
+              "pages.agent.organization.detail.no_record_details_detail",
+              "The selected record did not return diagnostic detail.",
+            )}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ActivityRecordDetailContent({
+  detail,
+}: {
+  detail: AgentOrganizationActivityDetail
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-3">
+      <DetailSection
+        title={t("pages.agent.organization.detail.identity", "Identity")}
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <RecordFact
+            label={t("pages.agent.organization.detail.record_type", "Type")}
+            value={t(
+              `pages.agent.organization.activity_type.${detail.type}`,
+              detail.type,
+            )}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.status", "Status")}
+            value={t(
+              `pages.agent.organization.status.${detail.status}`,
+              detail.status,
+            )}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.role_label", "Role")}
+            value={
+              detail.role
+                ? t(`pages.agent.organization.role.${detail.role}`, detail.role)
+                : t("common.notAvailable", "Unavailable")
+            }
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.peer_agent_short", "Peer")}
+            value={detail.peer_agent_id || detail.agent_id || unavailable(t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.created", "Created")}
+            value={formatTimestamp(detail.created_at, t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.updated", "Updated")}
+            value={formatTimestamp(detail.updated_at, t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.completed", "Completed")}
+            value={formatTimestamp(detail.completed_at, t)}
+          />
+        </div>
+      </DetailSection>
+
+      <DetailSection title={t("pages.agent.organization.detail.reason", "Reason")}>
+        <DetailText value={formatDiagnosticReason(detail, t)} />
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <RecordFact
+            label={t(
+              "pages.agent.organization.detail.reason_source_label",
+              "Reason source",
+            )}
+            value={formatDiagnosticReasonSource(detail, t)}
+          />
+          <RecordFact
+            label={t(
+              "pages.agent.organization.detail.severity_label",
+              "Severity",
+            )}
+            value={formatDiagnosticSeverity(detail, t)}
+          />
+          <RecordFact
+            label={t(
+              "pages.agent.organization.detail.current_status",
+              "Current status",
+            )}
+            value={formatDiagnosticFreshness(detail, detail.current === true, t)}
+          />
+        </div>
+      </DetailSection>
+
+      <DetailSection
+        title={t(
+          "pages.agent.organization.detail.request_context",
+          "Request and context",
+        )}
+      >
+        <DetailText
+          label={t(
+            "pages.agent.organization.detail.request_summary",
+            "Request summary",
+          )}
+          value={detail.request_summary}
+        />
+        <DetailText
+          label={t(
+            "pages.agent.organization.detail.context_summary",
+            "Context summary",
+          )}
+          value={detail.context_summary}
+        />
+      </DetailSection>
+
+      <DetailSection
+        title={t("pages.agent.organization.detail.result_summary", "Result")}
+      >
+        <DetailText value={detail.result_summary} />
+      </DetailSection>
+
+      <DetailSection
+        title={t("pages.agent.organization.detail.memory_status", "Memory")}
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <RecordFact
+            label={t("pages.agent.organization.detail.provider", "Provider")}
+            value={detail.memory?.provider || unavailable(t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.status", "Status")}
+            value={detail.memory?.status || unavailable(t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.memory_id", "Memory ID")}
+            value={detail.memory?.memory_id || unavailable(t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.updated", "Updated")}
+            value={formatTimestamp(detail.memory?.updated_at, t)}
+          />
+        </div>
+        <DetailText
+          label={t("pages.agent.organization.detail.error", "Error")}
+          value={detail.memory?.error}
+        />
+      </DetailSection>
+
+      <DetailSection
+        title={t("pages.agent.organization.detail.artifact_status", "Artifact")}
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <RecordFact
+            label={t("pages.agent.organization.detail.status", "Status")}
+            value={detail.artifact?.status || unavailable(t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.issue_id", "Issue ID")}
+            value={
+              typeof detail.artifact?.issue_id === "number"
+                ? String(detail.artifact.issue_id)
+                : unavailable(t)
+            }
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.issue_url", "Issue URL")}
+            value={detail.artifact?.issue_url || unavailable(t)}
+          />
+          <RecordFact
+            label={t("pages.agent.organization.detail.updated", "Updated")}
+            value={formatTimestamp(detail.artifact?.updated_at, t)}
+          />
+        </div>
+        <DetailText
+          label={t("pages.agent.organization.detail.error", "Error")}
+          value={detail.artifact?.error}
+        />
+      </DetailSection>
+
+      {detail.participants && detail.participants.length > 0 ? (
+        <DetailSection
+          title={t(
+            "pages.agent.organization.detail.participant_status",
+            "Participant status",
+          )}
+        >
+          <div className="space-y-2">
+            {detail.participants.map((participant, index) => (
+              <div
+                key={`${participant.agent_id ?? "participant"}:${index}`}
+                className="rounded-md border border-border/70 px-3 py-2"
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <RecordFact
+                    label={t(
+                      "pages.agent.organization.detail.agent_id",
+                      "Agent ID",
+                    )}
+                    value={participant.agent_id || unavailable(t)}
+                  />
+                  <RecordFact
+                    label={t("pages.agent.organization.detail.status", "Status")}
+                    value={participant.status || unavailable(t)}
+                  />
+                  <RecordFact
+                    label={t(
+                      "pages.agent.organization.detail.delegation_id",
+                      "Delegation ID",
+                    )}
+                    value={participant.delegation_id || unavailable(t)}
+                  />
+                  <RecordFact
+                    label={t("pages.agent.organization.detail.created", "Created")}
+                    value={formatTimestamp(participant.created_at, t)}
+                  />
+                </div>
+                <DetailText
+                  label={t(
+                    "pages.agent.organization.detail.summary",
+                    "Summary",
+                  )}
+                  value={participant.summary}
+                />
+              </div>
+            ))}
+          </div>
+        </DetailSection>
+      ) : null}
+
+      <DetailSection
+        title={t(
+          "pages.agent.organization.detail.artifact_references",
+          "Artifact references",
+        )}
+      >
+        <ArtifactSummary refs={detail.artifact_refs} />
+      </DetailSection>
+    </div>
+  )
+}
+
+function RecordDetailsAction({
+  available,
+  title,
+  record,
+  onSelectRecord,
+}: {
+  available?: boolean
+  title: string
+  record: Omit<AgentSelectedActivityRecord, "title">
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
+}) {
+  const { t } = useTranslation()
+  const selectableRecord = resolveSelectableActivityRecord(
+    { ...record, title },
+    available,
+  )
+  if (!selectableRecord) {
+    return null
+  }
+
+  return (
+    <div className="mt-3">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => onSelectRecord(selectableRecord)}
+      >
+        <IconListDetails className="size-4" />
+        {t("pages.agent.organization.detail.details_action", "Details")}
+      </Button>
+    </div>
+  )
+}
+
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-md border border-border/70 bg-background/70 px-3 py-3">
+      <h3 className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+        {title}
+      </h3>
+      <div className="mt-2">{children}</div>
+    </section>
+  )
+}
+
+function DetailText({ label, value }: { label?: string; value?: string }) {
+  const { t } = useTranslation()
+  const text = value?.trim() || unavailable(t)
+  return (
+    <div className={label ? "mt-2" : undefined}>
+      {label ? (
+        <div className="text-muted-foreground text-[11px] leading-4">
+          {label}
+        </div>
+      ) : null}
+      <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5">
+        {text}
+      </div>
+    </div>
+  )
+}
+
+function recordDetailErrorTitle(
+  error: Error,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (error instanceof ApiRequestError && error.status === 404) {
+    return t(
+      "pages.agent.organization.detail.record_detail_not_found",
+      "Record details not found",
+    )
+  }
+  if (error instanceof ApiRequestError && error.status === 403) {
+    return t(
+      "pages.agent.organization.detail.record_detail_permission_denied",
+      "Permission denied",
+    )
+  }
+  return t(
+    "pages.agent.organization.detail.record_detail_load_error",
+    "Failed to load record details",
+  )
+}
+
+function unavailable(t: ReturnType<typeof useTranslation>["t"]) {
+  return t("common.notAvailable", "Unavailable")
+}
+
 export function DelegationRecordsPanel({
   agentID,
   label,
   query,
+  sourceSection,
+  onSelectRecord,
 }: {
   agentID: string
   label: string
   query: UseQueryResult<Awaited<ReturnType<typeof getAgentInbox>>, Error>
+  sourceSection: "inbox" | "outbox"
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
 }) {
   const { t } = useTranslation()
   if (query.isLoading && !query.data) {
@@ -268,6 +703,8 @@ export function DelegationRecordsPanel({
           key={record.delegation_id}
           agentID={agentID}
           record={record}
+          sourceSection={sourceSection}
+          onSelectRecord={onSelectRecord}
         />
       ))}
     </div>
@@ -277,9 +714,13 @@ export function DelegationRecordsPanel({
 function DelegationRecordItem({
   agentID,
   record,
+  sourceSection,
+  onSelectRecord,
 }: {
   agentID: string
   record: AgentDelegationActivityRecord
+  sourceSection: "inbox" | "outbox"
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
 }) {
   const { t } = useTranslation()
   const peerAgent =
@@ -306,6 +747,19 @@ function DelegationRecordItem({
         </div>
         <StatusBadge status={record.status} />
       </div>
+      <RecordDetailsAction
+        available={record.detail_available}
+        title={t("pages.agent.organization.detail.delegation_title", {
+          defaultValue: "Delegation {{id}}",
+          id: shortRecordID(record.delegation_id),
+        })}
+        record={{
+          type: "delegation",
+          recordID: record.delegation_id,
+          sourceSection,
+        }}
+        onSelectRecord={onSelectRecord}
+      />
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <RecordFact
           label={t("pages.agent.organization.role_label", "Role")}
@@ -331,8 +785,10 @@ function DelegationRecordItem({
 
 export function MeetingRecordsPanel({
   query,
+  onSelectRecord,
 }: {
   query: UseQueryResult<Awaited<ReturnType<typeof getAgentMeetings>>, Error>
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
 }) {
   const { t } = useTranslation()
   if (query.isLoading && !query.data) {
@@ -370,24 +826,36 @@ export function MeetingRecordsPanel({
   return (
     <div className="space-y-2">
       {records.map((record) => (
-        <MeetingRecordItem key={record.meeting_id} record={record} />
+        <MeetingRecordItem
+          key={record.meeting_id}
+          record={record}
+          onSelectRecord={onSelectRecord}
+        />
       ))}
     </div>
   )
 }
 
-function MeetingRecordItem({ record }: { record: AgentMeetingActivityRecord }) {
+function MeetingRecordItem({
+  record,
+  onSelectRecord,
+}: {
+  record: AgentMeetingActivityRecord
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
+}) {
   const { t } = useTranslation()
+  const title =
+    record.title ||
+    t("pages.agent.organization.detail.meeting_title", {
+      defaultValue: "Meeting {{id}}",
+      id: shortRecordID(record.meeting_id),
+    })
   return (
     <ActivityRecordFrame status={record.status}>
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">
-            {record.title ||
-              t("pages.agent.organization.detail.meeting_title", {
-                defaultValue: "Meeting {{id}}",
-                id: shortRecordID(record.meeting_id),
-              })}
+            {title}
           </div>
           <div className="text-muted-foreground mt-0.5 truncate text-xs">
             {t("pages.agent.organization.detail.chair_agent", {
@@ -398,6 +866,16 @@ function MeetingRecordItem({ record }: { record: AgentMeetingActivityRecord }) {
         </div>
         <StatusBadge status={record.status} />
       </div>
+      <RecordDetailsAction
+        available={record.detail_available}
+        title={title}
+        record={{
+          type: "meeting",
+          recordID: record.meeting_id,
+          sourceSection: "meetings",
+        }}
+        onSelectRecord={onSelectRecord}
+      />
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <RecordFact
           label={t("pages.agent.organization.role_label", "Role")}
@@ -436,9 +914,11 @@ function MeetingRecordItem({ record }: { record: AgentMeetingActivityRecord }) {
 export function FailureRecordsPanel({
   agent,
   query,
+  onSelectRecord,
 }: {
   agent: AgentOrganizationAgent
   query: UseQueryResult<Awaited<ReturnType<typeof getAgentFailures>>, Error>
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
 }) {
   const { t } = useTranslation()
   const current = agent.activity.current
@@ -526,6 +1006,7 @@ export function FailureRecordsPanel({
             (record.current === true || sameActivityRecord(record, current))
           }
           record={record}
+          onSelectRecord={onSelectRecord}
         />
       ))}
     </div>
@@ -535,9 +1016,11 @@ export function FailureRecordsPanel({
 function FailureRecordItem({
   current,
   record,
+  onSelectRecord,
 }: {
   current: boolean
   record: AgentOrganizationActivityRecord
+  onSelectRecord: (record: AgentSelectedActivityRecord) => void
 }) {
   const { t } = useTranslation()
   const reason = formatDiagnosticReason(record, t)
@@ -568,6 +1051,26 @@ function FailureRecordItem({
         </div>
         <StatusBadge status={record.status} />
       </div>
+      <RecordDetailsAction
+        available={record.detail_available}
+        title={
+          current
+            ? t(
+                "pages.agent.organization.detail.current_failure",
+                "Current failure",
+              )
+            : t(
+                "pages.agent.organization.detail.historical_failure",
+                "Historical failure",
+              )
+        }
+        record={{
+          type: record.type,
+          recordID: record.record_id,
+          sourceSection: "failures",
+        }}
+        onSelectRecord={onSelectRecord}
+      />
       <div className="mt-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
         <div className="text-muted-foreground text-[11px] leading-4">
           {t("pages.agent.organization.detail.failure_reason", "Reason")}

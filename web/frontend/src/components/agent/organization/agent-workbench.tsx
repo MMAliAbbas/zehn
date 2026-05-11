@@ -4,16 +4,20 @@ import type { AgentOrganizationAgent } from "@/api/agents"
 
 import { AgentDetailContent } from "./agent-detail-content"
 import { displayAgentName } from "./formatting"
-import type { AgentWorkbenchSection } from "./types"
+import type { AgentSelectedActivityRecord, AgentWorkbenchSection } from "./types"
 
 export function AgentWorkbench({
   agent,
   activeSection,
+  selectedRecord,
   onSectionChange,
+  onSelectedRecordChange,
 }: {
   agent: AgentOrganizationAgent | null
   activeSection: AgentWorkbenchSection
+  selectedRecord: AgentSelectedActivityRecord | null
   onSectionChange: (section: AgentWorkbenchSection) => void
+  onSelectedRecordChange: (record: AgentSelectedActivityRecord | null) => void
 }) {
   const { t } = useTranslation()
 
@@ -40,7 +44,9 @@ export function AgentWorkbench({
             agent={agent}
             activeSection={activeSection}
             enabled
+            selectedRecord={selectedRecord}
             onSectionChange={onSectionChange}
+            onSelectedRecordChange={onSelectedRecordChange}
           />
         </>
       ) : (

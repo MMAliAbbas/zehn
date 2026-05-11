@@ -19,23 +19,32 @@ import {
   AgentOverviewPanel,
   DelegationRecordsPanel,
   FailureRecordsPanel,
+  ActivityRecordDetailPanel,
   LiveLogsPanel,
   MeetingRecordsPanel,
   RecentEventsPanel,
 } from "./detail-panels"
 import { detailTabForWorkbenchSection } from "./organization-state"
-import type { AgentDetailTab, AgentWorkbenchSection } from "./types"
+import type {
+  AgentDetailTab,
+  AgentSelectedActivityRecord,
+  AgentWorkbenchSection,
+} from "./types"
 
 export function AgentDetailContent({
   agent,
   activeSection,
   enabled,
+  selectedRecord,
   onSectionChange,
+  onSelectedRecordChange,
 }: {
   agent: AgentOrganizationAgent
   activeSection: AgentWorkbenchSection
   enabled: boolean
+  selectedRecord: AgentSelectedActivityRecord | null
   onSectionChange: (section: AgentWorkbenchSection) => void
+  onSelectedRecordChange: (record: AgentSelectedActivityRecord | null) => void
 }) {
   const { t } = useTranslation()
   const activeTab = detailTabForWorkbenchSection(activeSection)
@@ -112,6 +121,11 @@ export function AgentDetailContent({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+        <ActivityRecordDetailPanel
+          agentID={agent.id}
+          selectedRecord={selectedRecord}
+          onClear={() => onSelectedRecordChange(null)}
+        />
         {activeTab === "overview" ? (
           <AgentOverviewPanel agent={agent} />
         ) : activeTab === "inbox" ? (
@@ -119,17 +133,28 @@ export function AgentDetailContent({
             agentID={agent.id}
             label={t("pages.agent.organization.inbox", "Inbox")}
             query={inboxQuery}
+            sourceSection="inbox"
+            onSelectRecord={onSelectedRecordChange}
           />
         ) : activeTab === "outbox" ? (
           <DelegationRecordsPanel
             agentID={agent.id}
             label={t("pages.agent.organization.outbox", "Outbox")}
             query={outboxQuery}
+            sourceSection="outbox"
+            onSelectRecord={onSelectedRecordChange}
           />
         ) : activeTab === "meetings" ? (
-          <MeetingRecordsPanel query={meetingsQuery} />
+          <MeetingRecordsPanel
+            query={meetingsQuery}
+            onSelectRecord={onSelectedRecordChange}
+          />
         ) : activeTab === "failures" ? (
-          <FailureRecordsPanel agent={agent} query={failuresQuery} />
+          <FailureRecordsPanel
+            agent={agent}
+            query={failuresQuery}
+            onSelectRecord={onSelectedRecordChange}
+          />
         ) : activeTab === "live-logs" ? (
           <LiveLogsPanel agent={agent} />
         ) : (
@@ -151,19 +176,38 @@ export function StatefulAgentDetailContent({
 }) {
   const [activeSection, setActiveSection] =
     useState<AgentWorkbenchSection>(initialTab)
+  const [selectedRecord, setSelectedRecord] =
+    useState<AgentSelectedActivityRecord | null>(null)
 
   useEffect(() => {
     if (enabled) {
       setActiveSection(initialTab)
+      setSelectedRecord(null)
     }
   }, [agent.id, enabled, initialTab])
+
+  const handleSectionChange = (section: AgentWorkbenchSection) => {
+    setActiveSection(section)
+    setSelectedRecord(null)
+  }
+
+  const handleSelectedRecordChange = (
+    record: AgentSelectedActivityRecord | null,
+  ) => {
+    setSelectedRecord(record)
+    if (record) {
+      setActiveSection(record.sourceSection)
+    }
+  }
 
   return (
     <AgentDetailContent
       agent={agent}
       activeSection={activeSection}
       enabled={enabled}
-      onSectionChange={setActiveSection}
+      selectedRecord={selectedRecord}
+      onSectionChange={handleSectionChange}
+      onSelectedRecordChange={handleSelectedRecordChange}
     />
   )
 }

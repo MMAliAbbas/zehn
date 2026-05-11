@@ -201,9 +201,29 @@ export interface AgentOrganizationActivityDetail {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await launcherFetch(path, options)
   if (!res.ok) {
-    throw new Error(await extractErrorMessage(res))
+    throw new ApiRequestError(
+      await extractErrorMessage(res),
+      res.status,
+      res.statusText,
+    )
   }
   return res.json() as Promise<T>
+}
+
+export class ApiRequestError extends Error {
+  readonly status: number
+  readonly statusText: string
+
+  constructor(
+    message: string,
+    status: number,
+    statusText: string,
+  ) {
+    super(message)
+    this.name = "ApiRequestError"
+    this.status = status
+    this.statusText = statusText
+  }
 }
 
 export async function getAgentOrganization(): Promise<AgentOrganizationSnapshot> {

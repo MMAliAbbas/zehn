@@ -27,7 +27,15 @@ export type AgentDetailTab = AgentWorkbenchSection
 
 export type AgentActivityShortcut = "inbox" | "outbox" | "meetings" | "errors"
 
+export interface AgentSelectedActivityRecord {
+  type: string
+  recordID: string
+  sourceSection: AgentWorkbenchSection
+  title?: string
+}
+
 export interface OrganizationSelectionState {
   selectedAgentID: string | null
   workbenchSection: AgentWorkbenchSection
+  selectedRecord: AgentSelectedActivityRecord | null
 }

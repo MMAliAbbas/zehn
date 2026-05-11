@@ -13,6 +13,7 @@ import {
   formatDiagnosticReasonSource,
 } from "./formatting.ts"
 import {
+  ORGANIZATION_SELECTED_RECORD_EMPTY_LOG_MESSAGE,
   filterOrganizationLogLines,
   findOrganizationLogCorrelationFields,
 } from "./organization-log-correlation.ts"
@@ -282,7 +283,7 @@ test("resolves a selected agent from snapshot agents before walking roots", () =
   )
 })
 
-test("correlates live logs with the selected activity record and known peers", () => {
+test("correlates selected-record live logs only with the record and known peers", () => {
   const logs = [
     "level=info agent_id=li-engineering msg=start",
     "level=info delegation_id=delegation-123 target_agent_id=li-engineering",
@@ -296,18 +297,39 @@ test("correlates live logs with the selected activity record and known peers", (
   }
 
   assert.deepEqual(findOrganizationLogCorrelationFields(logs[1], target), [
-    "target_agent_id",
     "record_id",
   ])
   assert.deepEqual(
     filterOrganizationLogLines(logs, "selected-record", target),
     [
-      "level=info agent_id=li-engineering msg=start",
       "level=info delegation_id=delegation-123 target_agent_id=li-engineering",
       "level=info requester_id=li-cto msg=peer update",
     ],
   )
   assert.deepEqual(filterOrganizationLogLines(logs, "all", target), logs)
+})
+
+test("selected-record live log empty copy names strict record scope", () => {
+  assert.equal(
+    ORGANIZATION_SELECTED_RECORD_EMPTY_LOG_MESSAGE,
+    "No live logs reference the selected record or known peer agents yet.",
+  )
+})
+
+test("selected-record correlation ignores selected agent when it appears in peer ids", () => {
+  const logs = [
+    "level=info agent_id=li-engineering msg=agent-only",
+    "level=info requester_id=li-cto msg=peer",
+  ]
+  const target = {
+    selectedAgentID: "li-engineering",
+    selectedRecordID: "delegation-123",
+    peerAgentIDs: ["li-engineering", "li-cto"],
+  }
+
+  assert.deepEqual(filterOrganizationLogLines(logs, "selected-record", target), [
+    "level=info requester_id=li-cto msg=peer",
+  ])
 })
 
 test("formats old diagnostic records with safe fallback labels", () => {

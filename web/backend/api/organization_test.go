@@ -815,8 +815,11 @@ func TestHandleGetAgentActivityDetail_ReturnsVisibleDelegationDiagnostics(t *tes
 	if detail.Reason != "provider token=[redacted] failed" || detail.ReasonSource != "record_error" || detail.Severity != "error" {
 		t.Fatalf("detail reason = %+v", detail)
 	}
-	if detail.RequestSummary == "" || len(detail.RequestSummary) > 140 {
-		t.Fatalf("request summary = %q, want bounded non-empty summary", detail.RequestSummary)
+	if detail.RequestSummary == "" || strings.Contains(detail.RequestSummary, "investigate failing build") || strings.Contains(detail.RequestSummary, "task-body") {
+		t.Fatalf("request summary = %q, want structured diagnostic without task excerpt", detail.RequestSummary)
+	}
+	if detail.ResultSummary == "" || strings.Contains(detail.ResultSummary, "provider token=") {
+		t.Fatalf("result summary = %q, want structured diagnostic without result/error excerpt", detail.ResultSummary)
 	}
 	if detail.Memory == nil || detail.Memory.Provider != "yaad" || detail.Memory.Status != string(agent.AgentDelegationMemoryStatusFailed) || detail.Memory.Error == "" {
 		t.Fatalf("memory detail = %+v, want failed yaad status", detail.Memory)
@@ -884,8 +887,14 @@ func TestHandleGetAgentActivityDetail_ReturnsVisibleMeetingDiagnostics(t *testin
 	if len(detail.Participants) != 1 || detail.Participants[0].AgentID != "participant" || detail.Participants[0].Status != "failed" {
 		t.Fatalf("participant detail = %+v, want failed participant status", detail.Participants)
 	}
-	if detail.ContextSummary == "" || detail.ResultSummary == "" {
-		t.Fatalf("summaries missing: context=%q result=%q", detail.ContextSummary, detail.ResultSummary)
+	if detail.ContextSummary == "" || strings.Contains(detail.ContextSummary, "decide release path") || strings.Contains(detail.ContextSummary, "notes token=") {
+		t.Fatalf("context summary = %q, want structured diagnostic without meeting text excerpt", detail.ContextSummary)
+	}
+	if detail.ResultSummary == "" || strings.Contains(detail.ResultSummary, "participant response") {
+		t.Fatalf("result summary = %q, want structured diagnostic without participant text excerpt", detail.ResultSummary)
+	}
+	if detail.Participants[0].Summary != "" {
+		t.Fatalf("participant summary = %q, want no raw participant response summary", detail.Participants[0].Summary)
 	}
 	if detail.Artifact == nil || detail.Artifact.Status != string(agent.AgentGitHubArtifactStatusCreated) {
 		t.Fatalf("artifact detail = %+v, want created artifact status", detail.Artifact)
@@ -1038,8 +1047,8 @@ func TestHandleAgentOrganization_DiagnosticsFlowThroughSummaryListAndDetail(t *t
 	if delegationDetail.RecordID != delegation.DelegationID || delegationDetail.Role != "target" || delegationDetail.PeerAgentID != "lead" {
 		t.Fatalf("delegation detail identity = %+v", delegationDetail)
 	}
-	if delegationDetail.RequestSummary == "" || len(delegationDetail.RequestSummary) > 140 || delegationDetail.ResultSummary == "" || len(delegationDetail.ResultSummary) > 140 {
-		t.Fatalf("delegation detail summaries are not bounded: request=%q result=%q", delegationDetail.RequestSummary, delegationDetail.ResultSummary)
+	if delegationDetail.RequestSummary == "" || strings.Contains(delegationDetail.RequestSummary, "delegation task") || strings.Contains(delegationDetail.ResultSummary, "delegation provider") {
+		t.Fatalf("delegation detail summaries include raw excerpts: request=%q result=%q", delegationDetail.RequestSummary, delegationDetail.ResultSummary)
 	}
 
 	meetingDetailRec := requestAgentActivity(t, configPath, "/api/agents/worker/activity/meeting/"+meeting.MeetingID)
@@ -1051,8 +1060,8 @@ func TestHandleAgentOrganization_DiagnosticsFlowThroughSummaryListAndDetail(t *t
 	if meetingDetail.RecordID != meeting.MeetingID || meetingDetail.Role != "participant" || meetingDetail.PeerAgentID != "chair" {
 		t.Fatalf("meeting detail identity = %+v", meetingDetail)
 	}
-	if meetingDetail.ContextSummary == "" || len(meetingDetail.ContextSummary) > 140 || meetingDetail.ResultSummary == "" || len(meetingDetail.ResultSummary) > 140 {
-		t.Fatalf("meeting detail summaries are not bounded: context=%q result=%q", meetingDetail.ContextSummary, meetingDetail.ResultSummary)
+	if meetingDetail.ContextSummary == "" || strings.Contains(meetingDetail.ContextSummary, "meeting goal") || strings.Contains(meetingDetail.ResultSummary, "participant response") {
+		t.Fatalf("meeting detail summaries include raw excerpts: context=%q result=%q", meetingDetail.ContextSummary, meetingDetail.ResultSummary)
 	}
 }
 

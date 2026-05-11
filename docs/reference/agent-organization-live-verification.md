@@ -91,9 +91,9 @@ fields, including `agent_id`, `target_agent_id`,
 text, partial substrings, tokens, and sensitive-looking fields must not count
 as selected-agent references. When a detail record is selected, `Selected
 Record` further narrows or highlights lines that reference the selected record
-id, the selected agent's explicit reference fields, or known peer agent IDs from
-the selected record row. If no retained live log lines match, the panel shows a
-record-specific empty state without clearing the all-logs view.
+id or known peer agent IDs from the selected record row. It does not match the
+selected agent by itself. If no retained live log lines match, the panel shows
+a record-specific empty state without clearing the all-logs view.
 
 The Failures tab fetches the selected agent's recent visible failed delegation
 and meeting records. The current and last-failure summaries remain fallback

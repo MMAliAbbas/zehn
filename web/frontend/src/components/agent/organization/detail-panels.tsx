@@ -38,6 +38,7 @@ import {
   summarizeActivity,
 } from "./formatting"
 import {
+  ORGANIZATION_SELECTED_RECORD_EMPTY_LOG_MESSAGE,
   type OrganizationLogCorrelationMode,
   filterOrganizationLogLines,
   findOrganizationLogCorrelationFields,
@@ -149,6 +150,10 @@ export function LiveLogsPanel({
     () => filterOrganizationLogLines(logs, scopeMode, correlationTarget),
     [correlationTarget, logs, scopeMode],
   )
+  const highlightTarget =
+    scopeMode === "selected-agent"
+      ? { selectedAgentID: agent.id }
+      : correlationTarget
   const referencedLogCount = useMemo(
     () =>
       logs.filter(
@@ -180,9 +185,7 @@ export function LiveLogsPanel({
   const selectedRecordEmptyMessage = t(
     "pages.agent.organization.detail.live_logs_selected_record_empty",
     {
-      defaultValue:
-        "No live logs reference {{record}} or its known agents yet.",
-      record: selectedRecord?.recordID ?? "",
+      defaultValue: ORGANIZATION_SELECTED_RECORD_EMPTY_LOG_MESSAGE,
     },
   )
 
@@ -284,7 +287,7 @@ export function LiveLogsPanel({
                 : undefined
           }
           getLineReferenceFields={(line) =>
-            findOrganizationLogCorrelationFields(line, correlationTarget)
+            findOrganizationLogCorrelationFields(line, highlightTarget)
           }
           wrapColumns={wrapColumns}
           contentRef={contentRef}

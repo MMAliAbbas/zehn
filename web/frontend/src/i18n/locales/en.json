@@ -544,7 +544,7 @@
           "live_logs_selected": "Selected Agent",
           "live_logs_selected_empty": "No live logs reference {{agent}} yet.",
           "live_logs_selected_record": "Selected Record",
-          "live_logs_selected_record_empty": "No live logs reference {{record}} or its known agents yet.",
+          "live_logs_selected_record_empty": "No live logs reference the selected record or known peer agents yet.",
           "tabs_label": "Agent activity sections",
           "workspace": "Workspace",
           "group": "Group",

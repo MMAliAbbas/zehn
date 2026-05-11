@@ -148,6 +148,56 @@ export interface AgentMeetingActivityRecord {
   completed_at?: string
 }
 
+export interface AgentOrganizationMemoryDetail {
+  provider?: string
+  status?: string
+  memory_id?: string
+  error?: string
+  updated_at?: string
+}
+
+export interface AgentOrganizationArtifactDetail {
+  status?: string
+  issue_url?: string
+  issue_id?: number
+  error?: string
+  updated_at?: string
+}
+
+export interface AgentOrganizationParticipantDetail {
+  agent_id?: string
+  status?: string
+  delegation_id?: string
+  summary?: string
+  created_at?: string
+}
+
+export interface AgentOrganizationActivityDetail {
+  type: string
+  record_id: string
+  status: string
+  role?: string
+  agent_id?: string
+  peer_agent_id?: string
+  artifact_refs?: string[]
+  summary?: string
+  reason?: string
+  reason_source?: string
+  severity?: string
+  request_summary?: string
+  context_summary?: string
+  result_summary?: string
+  memory?: AgentOrganizationMemoryDetail
+  artifact?: AgentOrganizationArtifactDetail
+  participants?: AgentOrganizationParticipantDetail[]
+  current?: boolean
+  stale?: boolean
+  created_at?: string
+  updated_at?: string
+  started_at?: string
+  completed_at?: string
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await launcherFetch(path, options)
   if (!res.ok) {
@@ -201,6 +251,18 @@ export async function getAgentFailures(
 ): Promise<AgentActivityListResponse<AgentOrganizationActivityRecord>> {
   return request<AgentActivityListResponse<AgentOrganizationActivityRecord>>(
     agentActivityPath(agentID, "failures", limit),
+  )
+}
+
+export async function getAgentActivityDetail(
+  agentID: string,
+  type: "delegation" | "meeting" | string,
+  recordID: string,
+): Promise<AgentOrganizationActivityDetail> {
+  return request<AgentOrganizationActivityDetail>(
+    `/api/agents/${encodeURIComponent(agentID)}/activity/${encodeURIComponent(
+      type,
+    )}/${encodeURIComponent(recordID)}`,
   )
 }
 

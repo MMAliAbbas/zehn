@@ -4,8 +4,10 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -172,6 +174,56 @@ type agentMeetingActivitySummary struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
+type agentOrganizationActivityDetail struct {
+	Type           string                               `json:"type"`
+	RecordID       string                               `json:"record_id"`
+	Status         string                               `json:"status"`
+	Role           string                               `json:"role,omitempty"`
+	AgentID        string                               `json:"agent_id,omitempty"`
+	PeerAgentID    string                               `json:"peer_agent_id,omitempty"`
+	ArtifactRefs   []string                             `json:"artifact_refs,omitempty"`
+	Summary        string                               `json:"summary,omitempty"`
+	Reason         string                               `json:"reason,omitempty"`
+	ReasonSource   string                               `json:"reason_source,omitempty"`
+	Severity       string                               `json:"severity,omitempty"`
+	RequestSummary string                               `json:"request_summary,omitempty"`
+	ContextSummary string                               `json:"context_summary,omitempty"`
+	ResultSummary  string                               `json:"result_summary,omitempty"`
+	Memory         *agentOrganizationMemoryDetail       `json:"memory,omitempty"`
+	Artifact       *agentOrganizationArtifactDetail     `json:"artifact,omitempty"`
+	Participants   []agentOrganizationParticipantDetail `json:"participants,omitempty"`
+	Current        bool                                 `json:"current,omitempty"`
+	Stale          bool                                 `json:"stale,omitempty"`
+	CreatedAt      *time.Time                           `json:"created_at,omitempty"`
+	UpdatedAt      *time.Time                           `json:"updated_at,omitempty"`
+	StartedAt      *time.Time                           `json:"started_at,omitempty"`
+	CompletedAt    *time.Time                           `json:"completed_at,omitempty"`
+}
+
+type agentOrganizationMemoryDetail struct {
+	Provider  string     `json:"provider,omitempty"`
+	Status    string     `json:"status,omitempty"`
+	MemoryID  string     `json:"memory_id,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+type agentOrganizationArtifactDetail struct {
+	Status    string     `json:"status,omitempty"`
+	IssueURL  string     `json:"issue_url,omitempty"`
+	IssueID   int        `json:"issue_id,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+type agentOrganizationParticipantDetail struct {
+	AgentID      string     `json:"agent_id,omitempty"`
+	Status       string     `json:"status,omitempty"`
+	DelegationID string     `json:"delegation_id,omitempty"`
+	Summary      string     `json:"summary,omitempty"`
+	CreatedAt    *time.Time `json:"created_at,omitempty"`
+}
+
 type agentOrganizationBuildState struct {
 	agents      map[string]*agentOrganizationAgent
 	delegations []agent.AgentDelegationRecord
@@ -187,6 +239,7 @@ func (h *Handler) registerAgentOrganizationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/{id}/outbox", h.handleGetAgentOutbox)
 	mux.HandleFunc("GET /api/agents/{id}/meetings", h.handleGetAgentMeetings)
 	mux.HandleFunc("GET /api/agents/{id}/failures", h.handleGetAgentFailures)
+	mux.HandleFunc("GET /api/agents/{id}/activity/{type}/{record_id}", h.handleGetAgentActivityDetail)
 }
 
 // handleGetAgentOrganization returns a normalized configured agent hierarchy plus structured activity.
@@ -394,6 +447,100 @@ func (h *Handler) handleGetAgentFailures(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (h *Handler) handleGetAgentActivityDetail(w http.ResponseWriter, r *http.Request) {
+	cfg, agentID, _, ok := h.loadAgentActivityRequest(w, r)
+	if !ok {
+		return
+	}
+
+	recordType := strings.TrimSpace(r.PathValue("type"))
+	recordID := strings.TrimSpace(r.PathValue("record_id"))
+	var (
+		detail agentOrganizationActivityDetail
+		err    error
+	)
+	switch recordType {
+	case "delegation":
+		detail, err = loadDelegationActivityDetail(r.Context(), cfg, agentID, recordID)
+	case "meeting":
+		detail, err = loadMeetingActivityDetail(r.Context(), cfg, agentID, recordID)
+	default:
+		http.Error(w, fmt.Sprintf("unknown activity type %q", recordType), http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			http.Error(w, "activity record not found", http.StatusNotFound)
+		case errors.Is(err, errAgentActivityDetailForbidden):
+			http.Error(w, "activity record is not visible to selected agent", http.StatusForbidden)
+		default:
+			http.Error(w, fmt.Sprintf("Failed to load activity detail: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if snapshot, err := buildAgentOrganizationSnapshot(r.Context(), cfg); err == nil {
+		annotateActivityDetailCurrency(&detail, snapshot.Agents[agentID].Activity)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(detail); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+var errAgentActivityDetailForbidden = errors.New("activity detail forbidden")
+
+func loadDelegationActivityDetail(
+	ctx context.Context,
+	cfg *config.Config,
+	agentID string,
+	recordID string,
+) (agentOrganizationActivityDetail, error) {
+	rec, err := agent.NewDelegationRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "delegations"),
+		nil,
+	).Get(ctx, recordID)
+	if err != nil {
+		if isActivityDetailNotFound(err) {
+			return agentOrganizationActivityDetail{}, os.ErrNotExist
+		}
+		return agentOrganizationActivityDetail{}, err
+	}
+	if !delegationRecordVisibleToAgent(rec, agentID) {
+		return agentOrganizationActivityDetail{}, errAgentActivityDetailForbidden
+	}
+	return summarizeDelegationActivityDetail(rec, agentID), nil
+}
+
+func loadMeetingActivityDetail(
+	ctx context.Context,
+	cfg *config.Config,
+	agentID string,
+	recordID string,
+) (agentOrganizationActivityDetail, error) {
+	rec, err := agent.NewMeetingRecordStore(
+		filepath.Join(cfg.WorkspacePath(), "meetings"),
+		nil,
+	).Get(ctx, recordID)
+	if err != nil {
+		if isActivityDetailNotFound(err) {
+			return agentOrganizationActivityDetail{}, os.ErrNotExist
+		}
+		return agentOrganizationActivityDetail{}, err
+	}
+	if _, ok := meetingParticipantIDs(rec)[agentID]; !ok {
+		return agentOrganizationActivityDetail{}, errAgentActivityDetailForbidden
+	}
+	return summarizeMeetingActivityDetail(rec, agentID), nil
+}
+
+func isActivityDetailNotFound(err error) bool {
+	return errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, agent.ErrAgentDelegationInvalidRequest) ||
+		errors.Is(err, agent.ErrAgentMeetingInvalidRequest)
+}
+
 func (h *Handler) loadAgentActivityRequest(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -551,6 +698,33 @@ func delegationRoleForAgent(rec agent.AgentDelegationRecord, agentID string) str
 	}
 }
 
+func delegationRecordVisibleToAgent(rec agent.AgentDelegationRecord, agentID string) bool {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false
+	}
+	if rec.ParentAgentID == agentID || rec.TargetAgentID == agentID || rec.Request.RequestedBy == agentID {
+		return true
+	}
+	return slices.ContainsFunc(rec.VisibleToAgentIDs, func(visibleAgentID string) bool {
+		return strings.TrimSpace(visibleAgentID) == agentID
+	})
+}
+
+func delegationPeerAgentID(rec agent.AgentDelegationRecord, agentID string, role string) string {
+	switch role {
+	case "target":
+		return delegationRequesterID(rec)
+	case "requester":
+		return strings.TrimSpace(rec.TargetAgentID)
+	default:
+		if targetID := strings.TrimSpace(rec.TargetAgentID); targetID != "" && targetID != agentID {
+			return targetID
+		}
+		return delegationRequesterID(rec)
+	}
+}
+
 func summarizeMeetingActivity(rec agent.AgentMeetingRecord, agentID string) agentMeetingActivitySummary {
 	role := meetingParticipantIDs(rec)[agentID]
 	diagnostic := meetingDiagnostic(rec)
@@ -593,6 +767,73 @@ func summarizeMeetingFailureActivity(rec agent.AgentMeetingRecord, agentID strin
 		activity.AgentID = strings.TrimSpace(rec.ChairAgentID)
 	}
 	return activity
+}
+
+func summarizeDelegationActivityDetail(
+	rec agent.AgentDelegationRecord,
+	agentID string,
+) agentOrganizationActivityDetail {
+	role := delegationRoleForAgent(rec, agentID)
+	diagnostic := delegationDiagnostic(rec)
+	detail := agentOrganizationActivityDetail{
+		Type:           "delegation",
+		RecordID:       rec.DelegationID,
+		Status:         string(rec.Status),
+		Role:           role,
+		AgentID:        agentID,
+		PeerAgentID:    delegationPeerAgentID(rec, agentID, role),
+		ArtifactRefs:   delegationArtifactRefs(rec),
+		Summary:        diagnostic.Summary,
+		Reason:         diagnostic.Reason,
+		ReasonSource:   diagnostic.ReasonSource,
+		Severity:       diagnostic.Severity,
+		RequestSummary: detailText(rec.Request.Task),
+		ContextSummary: delegationContextSummary(rec),
+		ResultSummary:  delegationResultSummary(rec),
+		CreatedAt:      timePointer(rec.CreatedAt),
+		UpdatedAt:      timePointer(rec.UpdatedAt),
+		StartedAt:      timePointerValue(rec.StartedAt),
+		CompletedAt:    timePointerValue(rec.CompletedAt),
+	}
+	if rec.DurableMemory != nil {
+		detail.Memory = summarizeMemoryDetail(*rec.DurableMemory)
+	}
+	if rec.GitHubArtifact != nil {
+		detail.Artifact = summarizeArtifactDetail(*rec.GitHubArtifact)
+	}
+	return detail
+}
+
+func summarizeMeetingActivityDetail(
+	rec agent.AgentMeetingRecord,
+	agentID string,
+) agentOrganizationActivityDetail {
+	role := meetingParticipantIDs(rec)[agentID]
+	diagnostic := meetingDiagnostic(rec)
+	detail := agentOrganizationActivityDetail{
+		Type:           "meeting",
+		RecordID:       rec.MeetingID,
+		Status:         string(rec.Status),
+		Role:           role,
+		AgentID:        agentID,
+		PeerAgentID:    meetingPeerAgentID(rec, agentID, role),
+		ArtifactRefs:   append([]string(nil), rec.ArtifactRefs...),
+		Summary:        diagnostic.Summary,
+		Reason:         diagnostic.Reason,
+		ReasonSource:   diagnostic.ReasonSource,
+		Severity:       diagnostic.Severity,
+		RequestSummary: detailText(rec.Title),
+		ContextSummary: meetingContextSummary(rec),
+		ResultSummary:  meetingResultSummary(rec),
+		Participants:   summarizeMeetingParticipantDetails(rec.ParticipantTurns),
+		CreatedAt:      timePointer(rec.CreatedAt),
+		UpdatedAt:      timePointer(rec.UpdatedAt),
+		CompletedAt:    timePointerValue(rec.CompletedAt),
+	}
+	if rec.GitHubArtifact != nil {
+		detail.Artifact = summarizeArtifactDetail(*rec.GitHubArtifact)
+	}
+	return detail
 }
 
 func writeAgentActivityResponse[T any](w http.ResponseWriter, resp agentActivityListResponse[T]) {
@@ -1138,6 +1379,122 @@ func compactDiagnosticText(text string) string {
 	return strings.TrimSpace(text[:maxDiagnosticText-3]) + "..."
 }
 
+func detailText(text string) string {
+	return compactDiagnosticText(text)
+}
+
+func delegationContextSummary(rec agent.AgentDelegationRecord) string {
+	parts := []string{}
+	if rec.Request.Mode != "" {
+		parts = append(parts, "mode "+rec.Request.Mode)
+	}
+	if rec.Request.Priority != "" {
+		parts = append(parts, "priority "+rec.Request.Priority)
+	}
+	if rec.Request.ThreadKey != "" {
+		parts = append(parts, "thread "+rec.Request.ThreadKey)
+	}
+	if rec.Request.ApprovalRequired {
+		parts = append(parts, "approval required")
+	}
+	return detailText(strings.Join(parts, "; "))
+}
+
+func delegationResultSummary(rec agent.AgentDelegationRecord) string {
+	if rec.Result == nil {
+		if rec.Error != nil {
+			return detailText(rec.Error.Message)
+		}
+		return ""
+	}
+	if rec.Result.Content != "" {
+		return detailText(rec.Result.Content)
+	}
+	return detailText(string(rec.Result.Status))
+}
+
+func meetingContextSummary(rec agent.AgentMeetingRecord) string {
+	parts := []string{rec.Goal}
+	parts = append(parts, rec.Constraints...)
+	if rec.Notes != "" {
+		parts = append(parts, rec.Notes)
+	}
+	return detailText(strings.Join(parts, "; "))
+}
+
+func meetingResultSummary(rec agent.AgentMeetingRecord) string {
+	parts := []string{rec.Recommendation}
+	if rec.ChairTurn != nil {
+		parts = append(parts, rec.ChairTurn.Response)
+	}
+	for _, turn := range rec.ParticipantTurns {
+		if turn.Status != "" || turn.Response != "" {
+			parts = append(parts, strings.TrimSpace(turn.AgentID+" "+turn.Status+" "+turn.Response))
+		}
+	}
+	if rec.Error != "" {
+		parts = append(parts, rec.Error)
+	}
+	return detailText(strings.Join(parts, "; "))
+}
+
+func summarizeMemoryDetail(write agent.AgentDelegationMemoryWrite) *agentOrganizationMemoryDetail {
+	return &agentOrganizationMemoryDetail{
+		Provider:  detailText(write.Provider),
+		Status:    string(write.Status),
+		MemoryID:  detailText(write.MemoryID),
+		Error:     detailText(write.Error),
+		UpdatedAt: timePointer(write.UpdatedAt),
+	}
+}
+
+func summarizeArtifactDetail(write agent.AgentGitHubArtifactWrite) *agentOrganizationArtifactDetail {
+	return &agentOrganizationArtifactDetail{
+		Status:    string(write.Status),
+		IssueURL:  detailText(write.IssueURL),
+		IssueID:   write.IssueID,
+		Error:     detailText(write.Error),
+		UpdatedAt: timePointer(write.UpdatedAt),
+	}
+}
+
+func summarizeMeetingParticipantDetails(turns []agent.AgentMeetingTurn) []agentOrganizationParticipantDetail {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]agentOrganizationParticipantDetail, 0, len(turns))
+	for _, turn := range turns {
+		out = append(out, agentOrganizationParticipantDetail{
+			AgentID:      detailText(turn.AgentID),
+			Status:       detailText(turn.Status),
+			DelegationID: detailText(turn.DelegationID),
+			Summary:      detailText(turn.Response),
+			CreatedAt:    timePointer(turn.CreatedAt),
+		})
+	}
+	return out
+}
+
+func delegationArtifactRefs(rec agent.AgentDelegationRecord) []string {
+	refs := append([]string(nil), rec.Request.ArtifactRefs...)
+	if rec.Result != nil {
+		refs = appendUniqueStrings(refs, rec.Result.ArtifactRefs...)
+	}
+	return refs
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	out := append([]string(nil), values...)
+	for _, addition := range additions {
+		addition = strings.TrimSpace(addition)
+		if addition == "" || slices.Contains(out, addition) {
+			continue
+		}
+		out = append(out, addition)
+	}
+	return out
+}
+
 func (s *agentOrganizationBuildState) annotateActivityCurrency() {
 	for _, agentState := range s.agents {
 		if agentState == nil {
@@ -1173,6 +1530,19 @@ func annotateActivityRecordCurrency(record *agentOrganizationActivityRecord, act
 	}
 	record.Current = sameActivityRecord(record, activity.Current)
 	record.Stale = !record.Current && newerCurrentActivityExists(activity.Current, record)
+}
+
+func annotateActivityDetailCurrency(detail *agentOrganizationActivityDetail, activity agentOrganizationAgentActivity) {
+	if detail == nil {
+		return
+	}
+	record := agentOrganizationActivityRecord{
+		Type:      detail.Type,
+		RecordID:  detail.RecordID,
+		UpdatedAt: detail.UpdatedAt,
+	}
+	detail.Current = sameActivityRecord(&record, activity.Current)
+	detail.Stale = !detail.Current && newerCurrentActivityExists(activity.Current, &record)
 }
 
 func annotateDelegationSummaries(records []agentDelegationActivitySummary, activity agentOrganizationAgentActivity) {
@@ -1227,6 +1597,13 @@ func timePointer(value time.Time) *time.Time {
 	}
 	value = value.UTC()
 	return &value
+}
+
+func timePointerValue(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	return timePointer(*value)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1287,6 +1664,21 @@ func meetingParticipantIDs(rec agent.AgentMeetingRecord) map[string]string {
 		}
 	}
 	return ids
+}
+
+func meetingPeerAgentID(rec agent.AgentMeetingRecord, agentID string, role string) string {
+	switch role {
+	case "chair":
+		return strings.TrimSpace(rec.SponsorAgentID)
+	case "sponsor":
+		return strings.TrimSpace(rec.ChairAgentID)
+	default:
+		chairID := strings.TrimSpace(rec.ChairAgentID)
+		if chairID != "" && chairID != agentID {
+			return chairID
+		}
+		return strings.TrimSpace(rec.SponsorAgentID)
+	}
 }
 
 func organizationRecordActivity(

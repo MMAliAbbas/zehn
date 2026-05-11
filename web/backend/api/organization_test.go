@@ -761,6 +761,183 @@ func TestHandleGetAgentFailures_ReturnsRecentVisibleDelegationAndMeetingFailures
 	}
 }
 
+func TestHandleGetAgentActivityDetail_ReturnsVisibleDelegationDiagnostics(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+			{ID: "other", Name: "Other"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	rec := writeDelegationRecord(t, store, agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "investigate failing build with token=raw-secret " + strings.Repeat("task-body ", 40),
+		ArtifactRefs:  []string{"github:issue/123"},
+	})
+	if err := store.RecordMemoryWrite(context.Background(), rec.DelegationID, agent.AgentDelegationMemoryWrite{
+		Provider: "yaad",
+		Status:   agent.AgentDelegationMemoryStatusFailed,
+		Error:    "memory token=memory-secret " + strings.Repeat("memory-body ", 30),
+	}); err != nil {
+		t.Fatalf("RecordMemoryWrite() error = %v", err)
+	}
+	if err := store.RecordGitHubArtifact(context.Background(), rec.DelegationID, agent.AgentGitHubArtifactWrite{
+		Status:   agent.AgentGitHubArtifactStatusFailed,
+		IssueURL: "https://github.example/issues/123",
+		IssueID:  123,
+		Error:    "artifact token=artifact-secret " + strings.Repeat("artifact-body ", 30),
+	}, []string{"github:issue/123"}); err != nil {
+		t.Fatalf("RecordGitHubArtifact() error = %v", err)
+	}
+	if err := store.Failed(context.Background(), rec.DelegationID, errors.New("provider token=provider-secret failed")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+
+	httpRec := requestAgentActivity(t, configPath, "/api/agents/worker/activity/delegation/"+rec.DelegationID)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	body := httpRec.Body.String()
+	for _, private := range []string{"raw-secret", "memory-secret", "artifact-secret", "provider-secret", strings.Repeat("task-body ", 20)} {
+		if strings.Contains(body, private) {
+			t.Fatalf("detail leaked unbounded or sensitive content %q: %s", private, body)
+		}
+	}
+
+	var detail agentOrganizationActivityDetail
+	decodeJSONResponse(t, httpRec, &detail)
+	if detail.Type != "delegation" || detail.RecordID != rec.DelegationID || detail.Role != "target" || detail.PeerAgentID != "lead" {
+		t.Fatalf("detail identity = %+v, want target delegation with lead peer", detail)
+	}
+	if detail.Reason != "provider token=[redacted] failed" || detail.ReasonSource != "record_error" || detail.Severity != "error" {
+		t.Fatalf("detail reason = %+v", detail)
+	}
+	if detail.RequestSummary == "" || len(detail.RequestSummary) > 140 {
+		t.Fatalf("request summary = %q, want bounded non-empty summary", detail.RequestSummary)
+	}
+	if detail.Memory == nil || detail.Memory.Provider != "yaad" || detail.Memory.Status != string(agent.AgentDelegationMemoryStatusFailed) || detail.Memory.Error == "" {
+		t.Fatalf("memory detail = %+v, want failed yaad status", detail.Memory)
+	}
+	if detail.Artifact == nil || detail.Artifact.Status != string(agent.AgentGitHubArtifactStatusFailed) || detail.Artifact.IssueID != 123 || detail.Artifact.Error == "" {
+		t.Fatalf("artifact detail = %+v, want failed artifact status", detail.Artifact)
+	}
+	if got, want := strings.Join(detail.ArtifactRefs, ","), "github:issue/123"; got != want {
+		t.Fatalf("artifact refs = %q, want %q", got, want)
+	}
+}
+
+func TestHandleGetAgentActivityDetail_ReturnsVisibleMeetingDiagnostics(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "sponsor", Name: "Sponsor"},
+			{ID: "chair", Name: "Chair"},
+			{ID: "participant", Name: "Participant"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	rec := writeMeetingRecord(t, store, agent.AgentMeetingRequest{
+		Title:               "Risk review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+		Goal:                "decide release path " + strings.Repeat("goal-body ", 40),
+		Notes:               "notes token=notes-secret " + strings.Repeat("notes-body ", 30),
+		ArtifactRefs:        []string{"github:discussion/789"},
+	})
+	if err := store.AddParticipantTurn(context.Background(), rec.MeetingID, agent.AgentMeetingTurn{
+		AgentID:      "participant",
+		DelegationID: "delegation-20260507T090000.000000000Z-abcdef123456",
+		Response:     "participant response must be summarized " + strings.Repeat("participant-body ", 40),
+		Status:       "failed",
+	}); err != nil {
+		t.Fatalf("AddParticipantTurn() error = %v", err)
+	}
+	if err := store.RecordGitHubArtifact(context.Background(), rec.MeetingID, agent.AgentGitHubArtifactWrite{
+		Status: agent.AgentGitHubArtifactStatusCreated,
+	}, []string{"github:discussion/789"}); err != nil {
+		t.Fatalf("RecordGitHubArtifact() error = %v", err)
+	}
+
+	httpRec := requestAgentActivity(t, configPath, "/api/agents/chair/activity/meeting/"+rec.MeetingID)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	body := httpRec.Body.String()
+	for _, private := range []string{"notes-secret", strings.Repeat("goal-body ", 20), strings.Repeat("participant-body ", 20)} {
+		if strings.Contains(body, private) {
+			t.Fatalf("detail leaked unbounded or sensitive content %q: %s", private, body)
+		}
+	}
+
+	var detail agentOrganizationActivityDetail
+	decodeJSONResponse(t, httpRec, &detail)
+	if detail.Type != "meeting" || detail.RecordID != rec.MeetingID || detail.Role != "chair" || detail.PeerAgentID != "sponsor" {
+		t.Fatalf("detail identity = %+v, want chair meeting with sponsor peer", detail)
+	}
+	if detail.Reason != "Participant participant failed" || detail.ReasonSource != "participant_turn" {
+		t.Fatalf("detail reason = %q source %q, want participant failure", detail.Reason, detail.ReasonSource)
+	}
+	if len(detail.Participants) != 1 || detail.Participants[0].AgentID != "participant" || detail.Participants[0].Status != "failed" {
+		t.Fatalf("participant detail = %+v, want failed participant status", detail.Participants)
+	}
+	if detail.ContextSummary == "" || detail.ResultSummary == "" {
+		t.Fatalf("summaries missing: context=%q result=%q", detail.ContextSummary, detail.ResultSummary)
+	}
+	if detail.Artifact == nil || detail.Artifact.Status != string(agent.AgentGitHubArtifactStatusCreated) {
+		t.Fatalf("artifact detail = %+v, want created artifact status", detail.Artifact)
+	}
+}
+
+func TestHandleGetAgentActivityDetail_RejectsHiddenAndUnknownRecords(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+			{ID: "other", Name: "Other"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	rec := writeDelegationRecord(t, store, agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "hidden task must not leak",
+	})
+	meetings := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	meeting := writeMeetingRecord(t, meetings, agent.AgentMeetingRequest{
+		Title:               "Hidden review",
+		SponsorAgentID:      "lead",
+		ChairAgentID:        "worker",
+		ParticipantAgentIDs: []string{"worker"},
+		Goal:                "hidden meeting goal must not leak",
+	})
+
+	hidden := requestAgentActivity(t, configPath, "/api/agents/other/activity/delegation/"+rec.DelegationID)
+	if hidden.Code != http.StatusForbidden {
+		t.Fatalf("hidden status = %d, want %d, body=%s", hidden.Code, http.StatusForbidden, hidden.Body.String())
+	}
+	if strings.Contains(hidden.Body.String(), "hidden task") {
+		t.Fatalf("hidden response leaked record content: %s", hidden.Body.String())
+	}
+
+	hiddenMeeting := requestAgentActivity(t, configPath, "/api/agents/other/activity/meeting/"+meeting.MeetingID)
+	if hiddenMeeting.Code != http.StatusForbidden {
+		t.Fatalf("hidden meeting status = %d, want %d, body=%s", hiddenMeeting.Code, http.StatusForbidden, hiddenMeeting.Body.String())
+	}
+	if strings.Contains(hiddenMeeting.Body.String(), "hidden meeting goal") {
+		t.Fatalf("hidden meeting response leaked record content: %s", hiddenMeeting.Body.String())
+	}
+
+	unknown := requestAgentActivity(t, configPath, "/api/agents/worker/activity/delegation/delegation-missing")
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown status = %d, want %d, body=%s", unknown.Code, http.StatusNotFound, unknown.Body.String())
+	}
+}
+
 func TestHandleAgentOrganization_NewerFailureRemainsCurrentWithoutNewerActiveRecord(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{

@@ -556,6 +556,27 @@
           "no_failures_detail": "This agent has no visible failure records.",
           "current_failure": "Current failure",
           "historical_failure": "Historical failure",
+          "current_diagnostic": "Current",
+          "stale_diagnostic": "Stale",
+          "failure_reason": "Reason",
+          "unknown_failure_reason": "No diagnostic reason available",
+          "current_status": "Current status",
+          "severity_label": "Severity",
+          "unknown_severity": "Unknown",
+          "reason_source_label": "Reason source",
+          "unknown_reason_source": "Unknown source",
+          "reason_source": {
+            "record_error": "Record error",
+            "memory_error": "Memory write",
+            "artifact_error": "Artifact write",
+            "participant_turn": "Participant turn",
+            "status": "Status"
+          },
+          "severity": {
+            "info": "Info",
+            "warning": "Warning",
+            "error": "Error"
+          },
           "stale_failure_notice": "Last failure is historical. Newer current activity is {{activity}}.",
           "last_failure_notice": "Last failure is not the current activity.",
           "delegation_title": "Delegation {{id}}",

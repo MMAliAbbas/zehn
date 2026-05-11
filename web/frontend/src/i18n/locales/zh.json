@@ -556,6 +556,27 @@
           "no_failures_detail": "此智能体没有可见的失败记录。",
           "current_failure": "当前失败",
           "historical_failure": "历史失败",
+          "current_diagnostic": "当前",
+          "stale_diagnostic": "已过期",
+          "failure_reason": "原因",
+          "unknown_failure_reason": "没有可用的诊断原因",
+          "current_status": "当前状态",
+          "severity_label": "严重性",
+          "unknown_severity": "未知",
+          "reason_source_label": "原因来源",
+          "unknown_reason_source": "未知来源",
+          "reason_source": {
+            "record_error": "记录错误",
+            "memory_error": "记忆写入",
+            "artifact_error": "产物写入",
+            "participant_turn": "参与者回合",
+            "status": "状态"
+          },
+          "severity": {
+            "info": "信息",
+            "warning": "警告",
+            "error": "错误"
+          },
           "stale_failure_notice": "上次失败是历史记录。更新的当前活动是 {{activity}}。",
           "last_failure_notice": "上次失败不是当前活动。",
           "delegation_title": "委派 {{id}}",

@@ -24,6 +24,10 @@ import {
   buildFailureDrilldownRecords,
   compactActivityEvents,
   errorMessage,
+  formatDiagnosticFreshness,
+  formatDiagnosticReason,
+  formatDiagnosticReasonSource,
+  formatDiagnosticSeverity,
   formatTimestamp,
   shortRecordID,
   summarizeActivity,
@@ -517,7 +521,10 @@ export function FailureRecordsPanel({
       {records.map((record) => (
         <FailureRecordItem
           key={`${record.type}:${record.record_id}`}
-          current={sameActivityRecord(record, current)}
+          current={
+            record.stale !== true &&
+            (record.current === true || sameActivityRecord(record, current))
+          }
           record={record}
         />
       ))}
@@ -533,6 +540,10 @@ function FailureRecordItem({
   record: AgentOrganizationActivityRecord
 }) {
   const { t } = useTranslation()
+  const reason = formatDiagnosticReason(record, t)
+  const source = formatDiagnosticReasonSource(record, t)
+  const severity = formatDiagnosticSeverity(record, t)
+  const freshness = formatDiagnosticFreshness(record, current, t)
   return (
     <ActivityRecordFrame
       status={record.status}
@@ -557,7 +568,33 @@ function FailureRecordItem({
         </div>
         <StatusBadge status={record.status} />
       </div>
+      <div className="mt-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
+        <div className="text-muted-foreground text-[11px] leading-4">
+          {t("pages.agent.organization.detail.failure_reason", "Reason")}
+        </div>
+        <div className="mt-0.5 line-clamp-2 text-xs leading-5 break-words">
+          {reason}
+        </div>
+      </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <RecordFact
+          label={t(
+            "pages.agent.organization.detail.current_status",
+            "Current status",
+          )}
+          value={freshness}
+        />
+        <RecordFact
+          label={t("pages.agent.organization.detail.severity_label", "Severity")}
+          value={severity}
+        />
+        <RecordFact
+          label={t(
+            "pages.agent.organization.detail.reason_source_label",
+            "Reason source",
+          )}
+          value={source}
+        />
         <RecordFact
           label={t("pages.agent.organization.detail.record_type", "Type")}
           value={t(

@@ -69,6 +69,64 @@ export function summarizeActivity(
   return [type, role, status].filter(Boolean).join(" / ")
 }
 
+export function formatDiagnosticReason(
+  record: Pick<AgentOrganizationActivityRecord, "reason">,
+  t: TFunction,
+) {
+  return (
+    record.reason?.trim() ||
+    t(
+      "pages.agent.organization.detail.unknown_failure_reason",
+      "No diagnostic reason available",
+    )
+  )
+}
+
+export function formatDiagnosticReasonSource(
+  record: Pick<AgentOrganizationActivityRecord, "reason_source">,
+  t: TFunction,
+) {
+  const source = record.reason_source?.trim()
+  if (!source) {
+    return t(
+      "pages.agent.organization.detail.unknown_reason_source",
+      "Unknown source",
+    )
+  }
+  return t(
+    `pages.agent.organization.detail.reason_source.${source}`,
+    humanizeDiagnosticCode(source),
+  )
+}
+
+export function formatDiagnosticSeverity(
+  record: Pick<AgentOrganizationActivityRecord, "severity">,
+  t: TFunction,
+) {
+  const severity = record.severity?.trim()
+  if (!severity) {
+    return t("pages.agent.organization.detail.unknown_severity", "Unknown")
+  }
+  return t(
+    `pages.agent.organization.detail.severity.${severity}`,
+    humanizeDiagnosticCode(severity),
+  )
+}
+
+export function formatDiagnosticFreshness(
+  record: Pick<AgentOrganizationActivityRecord, "current" | "stale">,
+  current: boolean,
+  t: TFunction,
+) {
+  if (record.stale) {
+    return t("pages.agent.organization.detail.stale_diagnostic", "Stale")
+  }
+  if (record.current || current) {
+    return t("pages.agent.organization.detail.current_diagnostic", "Current")
+  }
+  return t("pages.agent.organization.detail.stale_diagnostic", "Stale")
+}
+
 export function compactActivityEvents(
   current: AgentOrganizationActivityRecord | undefined,
   lastFailure: AgentOrganizationActivityRecord | undefined,
@@ -149,4 +207,17 @@ export function isProblemStatus(status: string) {
 
 export function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function humanizeDiagnosticCode(value: string) {
+  const words = value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+  if (words.length === 0) {
+    return value
+  }
+  return [
+    words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase(),
+    ...words.slice(1).map((part) => part.toLowerCase()),
+  ].join(" ")
 }

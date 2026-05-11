@@ -5,7 +5,15 @@ import test from "node:test"
 
 import type { AgentOrganizationActivityRecord } from "@/api/agents"
 
-import { buildFailureDrilldownRecords } from "./formatting.ts"
+import {
+  buildFailureDrilldownRecords,
+  formatDiagnosticFreshness,
+  formatDiagnosticReason,
+  formatDiagnosticReasonSource,
+  formatDiagnosticSeverity,
+} from "./formatting.ts"
+
+const t = ((key: string, fallback?: string) => fallback ?? key) as never
 
 test("uses the recent failure list when multiple failures exist", () => {
   const current: AgentOrganizationActivityRecord = {
@@ -67,4 +75,38 @@ test("falls back to current and last failure summaries while data is unavailable
     ),
     ["delegation:delegation-current-failed"],
   )
+})
+
+test("formats diagnostic reason metadata with stable fallbacks", () => {
+  const record: AgentOrganizationActivityRecord = {
+    type: "delegation",
+    record_id: "delegation-failed",
+    status: "failed",
+    reason: "  provider timed out  ",
+    reason_source: "record_error",
+    severity: "error",
+    current: true,
+  }
+
+  assert.equal(formatDiagnosticReason(record, t), "provider timed out")
+  assert.equal(formatDiagnosticReasonSource(record, t), "Record error")
+  assert.equal(formatDiagnosticSeverity(record, t), "Error")
+  assert.equal(formatDiagnosticFreshness(record, false, t), "Current")
+})
+
+test("formats missing and stale diagnostic fields without broken copy", () => {
+  const record: AgentOrganizationActivityRecord = {
+    type: "meeting",
+    record_id: "meeting-failed",
+    status: "failed",
+    stale: true,
+  }
+
+  assert.equal(
+    formatDiagnosticReason(record, t),
+    "No diagnostic reason available",
+  )
+  assert.equal(formatDiagnosticReasonSource(record, t), "Unknown source")
+  assert.equal(formatDiagnosticSeverity(record, t), "Unknown")
+  assert.equal(formatDiagnosticFreshness(record, true, t), "Stale")
 })

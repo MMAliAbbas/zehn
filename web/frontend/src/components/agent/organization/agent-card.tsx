@@ -21,7 +21,12 @@ import {
 import { cn } from "@/lib/utils"
 
 import { AgentDetailSheet } from "./agent-detail-sheet"
-import { displayAgentName, summarizeActivity } from "./formatting"
+import {
+  displayAgentName,
+  formatDiagnosticReason,
+  isProblemStatus,
+  summarizeActivity,
+} from "./formatting"
 import {
   type AgentCardShortcut,
   resolveAgentCardShortcut,
@@ -47,6 +52,12 @@ export function AgentCard({
     useState<AgentDetailTab>("overview")
   const displayName = displayAgentName(agent)
   const activity = summarizeActivity(agent.activity.current, t)
+  const currentFailureReason =
+    agent.activity.current &&
+    isProblemStatus(agent.activity.current.status) &&
+    agent.activity.current.reason?.trim()
+      ? formatDiagnosticReason(agent.activity.current, t)
+      : ""
   const desktopWorkbench = useDesktopWorkbenchLayout()
   const selectAgent = () => {
     onSelect(agent.id)
@@ -161,6 +172,17 @@ export function AgentCard({
             <IconClock className="size-3.5 shrink-0" />
             <span className="truncate">{activity}</span>
           </div>
+          {currentFailureReason ? (
+            <div
+              className="text-destructive flex min-w-0 items-start gap-1.5 text-xs leading-4"
+              title={currentFailureReason}
+            >
+              <IconAlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span className="line-clamp-2 break-words">
+                {currentFailureReason}
+              </span>
+            </div>
+          ) : null}
           {counts.length > 0 ? (
             <div className="pointer-events-auto flex min-w-0 flex-wrap gap-1.5">
               {counts.map((item) => (

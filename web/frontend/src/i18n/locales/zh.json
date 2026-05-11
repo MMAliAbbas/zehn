@@ -543,6 +543,8 @@
           "live_logs_all": "全部日志",
           "live_logs_selected": "所选智能体",
           "live_logs_selected_empty": "尚无实时日志引用 {{agent}}。",
+          "live_logs_selected_record": "所选记录",
+          "live_logs_selected_record_empty": "尚无实时日志引用 {{record}} 或其已知智能体。",
           "tabs_label": "智能体活动分区",
           "workspace": "工作区",
           "group": "分组",

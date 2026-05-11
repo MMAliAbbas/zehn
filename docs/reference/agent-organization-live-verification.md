@@ -89,7 +89,11 @@ fields, including `agent_id`, `target_agent_id`,
 `parent_agent_id`, `requester_id`, `sponsor_agent_id`, `chair_agent_id`,
 `child_agent_id`, `route_agent_id`, and `scope_agent_id`. Arbitrary message
 text, partial substrings, tokens, and sensitive-looking fields must not count
-as selected-agent references.
+as selected-agent references. When a detail record is selected, `Selected
+Record` further narrows or highlights lines that reference the selected record
+id, the selected agent's explicit reference fields, or known peer agent IDs from
+the selected record row. If no retained live log lines match, the panel shows a
+record-specific empty state without clearing the all-logs view.
 
 The Failures tab fetches the selected agent's recent visible failed delegation
 and meeting records. The current and last-failure summaries remain fallback

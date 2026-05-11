@@ -4,16 +4,21 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  filterOrganizationLogLines,
+  findOrganizationLogCorrelationFields,
+} from "./organization-log-correlation.ts"
+import {
   DEFAULT_WORKBENCH_SECTION,
   clearSelectedOrganizationRecord,
   createOrganizationSelectionState,
   detailTabForWorkbenchSection,
-  resolveSelectableActivityRecord,
   resolveActivityShortcut,
   resolveAgentCardShortcut,
+  resolveSelectableActivityRecord,
   resolveSelectedOrganizationAgent,
   selectOrganizationActivityRecord,
   selectOrganizationAgent,
+  selectOrganizationWorkbenchSection,
 } from "./organization-state.ts"
 import { AGENT_WORKBENCH_SECTIONS } from "./types.ts"
 
@@ -100,6 +105,34 @@ test("clears the selected activity record without changing the selected agent or
     workbenchSection: "inbox",
     selectedRecord: null,
   })
+})
+
+test("preserves a selected activity record when switching to live logs", () => {
+  const current = selectOrganizationActivityRecord(
+    selectOrganizationAgent(
+      createOrganizationSelectionState(),
+      "li-engineering",
+    ),
+    {
+      type: "delegation",
+      recordID: "delegation-123",
+      sourceSection: "failures",
+    },
+  )
+
+  assert.deepEqual(selectOrganizationWorkbenchSection(current, "live-logs"), {
+    selectedAgentID: "li-engineering",
+    workbenchSection: "live-logs",
+    selectedRecord: {
+      type: "delegation",
+      recordID: "delegation-123",
+      sourceSection: "failures",
+    },
+  })
+  assert.equal(
+    selectOrganizationWorkbenchSection(current, "overview").selectedRecord,
+    null,
+  )
 })
 
 test("only resolves selectable activity records when detail inspection is available", () => {
@@ -238,4 +271,32 @@ test("resolves a selected agent from snapshot agents before walking roots", () =
     resolveSelectedOrganizationAgent(snapshot, "li-engineering")?.label,
     "Engineering",
   )
+})
+
+test("correlates live logs with the selected activity record and known peers", () => {
+  const logs = [
+    "level=info agent_id=li-engineering msg=start",
+    "level=info delegation_id=delegation-123 target_agent_id=li-engineering",
+    "level=info requester_id=li-cto msg=peer update",
+    "level=info agent_id=li-cfo msg=global",
+  ]
+  const target = {
+    selectedAgentID: "li-engineering",
+    selectedRecordID: "delegation-123",
+    peerAgentIDs: ["li-cto"],
+  }
+
+  assert.deepEqual(findOrganizationLogCorrelationFields(logs[1], target), [
+    "target_agent_id",
+    "record_id",
+  ])
+  assert.deepEqual(
+    filterOrganizationLogLines(logs, "selected-record", target),
+    [
+      "level=info agent_id=li-engineering msg=start",
+      "level=info delegation_id=delegation-123 target_agent_id=li-engineering",
+      "level=info requester_id=li-cto msg=peer update",
+    ],
+  )
+  assert.deepEqual(filterOrganizationLogLines(logs, "all", target), logs)
 })

@@ -18,6 +18,7 @@ import {
   resolveSelectedOrganizationAgent,
   selectOrganizationActivityRecord,
   selectOrganizationAgent,
+  selectOrganizationWorkbenchSection,
 } from "./organization-state"
 import { OrganizationBranch } from "./organization-tree"
 import {
@@ -25,7 +26,10 @@ import {
   OrganizationCommandHeader,
   StatePanel,
 } from "./status-components"
-import type { AgentSelectedActivityRecord, AgentWorkbenchSection } from "./types"
+import type {
+  AgentSelectedActivityRecord,
+  AgentWorkbenchSection,
+} from "./types"
 
 export function OrganizationPage() {
   const { t } = useTranslation()
@@ -59,11 +63,9 @@ export function OrganizationPage() {
   )
   const handleWorkbenchSectionChange = useCallback(
     (section: AgentWorkbenchSection) => {
-      setSelection((current) => ({
-        ...current,
-        workbenchSection: section,
-        selectedRecord: null,
-      }))
+      setSelection((current) =>
+        selectOrganizationWorkbenchSection(current, section),
+      )
     },
     [],
   )

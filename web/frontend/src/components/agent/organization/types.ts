@@ -32,6 +32,7 @@ export interface AgentSelectedActivityRecord {
   recordID: string
   sourceSection: AgentWorkbenchSection
   title?: string
+  peerAgentIDs?: string[]
 }
 
 export interface OrganizationSelectionState {

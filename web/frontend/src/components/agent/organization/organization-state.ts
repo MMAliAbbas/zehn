@@ -55,6 +55,17 @@ export function clearSelectedOrganizationRecord(
   }
 }
 
+export function selectOrganizationWorkbenchSection(
+  current: OrganizationSelectionState,
+  section: AgentWorkbenchSection,
+): OrganizationSelectionState {
+  return {
+    ...current,
+    workbenchSection: section,
+    selectedRecord: section === "live-logs" ? current.selectedRecord : null,
+  }
+}
+
 export function resolveSelectableActivityRecord(
   record: AgentSelectedActivityRecord,
   detailAvailable?: boolean,

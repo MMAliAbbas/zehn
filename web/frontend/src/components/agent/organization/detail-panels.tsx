@@ -1,13 +1,13 @@
 import { IconListDetails, IconX } from "@tabler/icons-react"
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { type UseQueryResult, useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type {
-  AgentOrganizationActivityDetail,
   AgentDelegationActivityRecord,
   AgentMeetingActivityRecord,
+  AgentOrganizationActivityDetail,
   AgentOrganizationActivityRecord,
   AgentOrganizationAgent,
   AgentOrganizationRecentEvent,
@@ -23,11 +23,6 @@ import { LogsPanel } from "@/components/logs/logs-panel"
 import { Button } from "@/components/ui/button"
 import { useGatewayLogs } from "@/hooks/use-gateway-logs"
 import { useLogWrapColumns } from "@/hooks/use-log-wrap-columns"
-import type { AgentLogScopeMode } from "@/lib/agent-log-filter"
-import {
-  filterAgentLogLines,
-  findAgentLogReferenceFields,
-} from "@/lib/agent-log-filter"
 
 import {
   buildFailureDrilldownRecords,
@@ -41,6 +36,11 @@ import {
   shortRecordID,
   summarizeActivity,
 } from "./formatting"
+import {
+  type OrganizationLogCorrelationMode,
+  filterOrganizationLogLines,
+  findOrganizationLogCorrelationFields,
+} from "./organization-log-correlation"
 import { resolveSelectableActivityRecord } from "./organization-state"
 import {
   ActivityRecordFrame,
@@ -117,27 +117,71 @@ export function AgentOverviewPanel({
   )
 }
 
-export function LiveLogsPanel({ agent }: { agent: AgentOrganizationAgent }) {
+export function LiveLogsPanel({
+  agent,
+  selectedRecord,
+}: {
+  agent: AgentOrganizationAgent
+  selectedRecord: AgentSelectedActivityRecord | null
+}) {
   const { t } = useTranslation()
-  const [scopeMode, setScopeMode] = useState<AgentLogScopeMode>("all")
+  const [scopeMode, setScopeMode] =
+    useState<OrganizationLogCorrelationMode>("all")
   const { contentRef, measureRef, wrapColumns } = useLogWrapColumns()
   const { error, gatewayStatus, logs, stale } = useGatewayLogs()
+  const correlationTarget = useMemo(
+    () => ({
+      selectedAgentID: agent.id,
+      selectedRecordID: selectedRecord?.recordID,
+      peerAgentIDs: selectedRecord?.peerAgentIDs,
+    }),
+    [agent.id, selectedRecord?.peerAgentIDs, selectedRecord?.recordID],
+  )
+
+  useEffect(() => {
+    if (scopeMode === "selected-record" && !selectedRecord) {
+      setScopeMode("selected-agent")
+    }
+  }, [scopeMode, selectedRecord])
+
   const visibleLogs = useMemo(
-    () => filterAgentLogLines(logs, agent.id, scopeMode),
-    [agent.id, logs, scopeMode],
+    () => filterOrganizationLogLines(logs, scopeMode, correlationTarget),
+    [correlationTarget, logs, scopeMode],
   )
   const referencedLogCount = useMemo(
     () =>
       logs.filter(
-        (line) => findAgentLogReferenceFields(line, agent.id).length > 0,
+        (line) =>
+          findOrganizationLogCorrelationFields(line, {
+            selectedAgentID: agent.id,
+          }).length > 0,
       ).length,
     [agent.id, logs],
+  )
+  const recordLogCount = useMemo(
+    () =>
+      selectedRecord
+        ? logs.filter(
+            (line) =>
+              findOrganizationLogCorrelationFields(line, correlationTarget)
+                .length > 0,
+          ).length
+        : 0,
+    [correlationTarget, logs, selectedRecord],
   )
   const selectedAgentEmptyMessage = t(
     "pages.agent.organization.detail.live_logs_selected_empty",
     {
       defaultValue: "No live logs reference {{agent}} yet.",
       agent: agent.label || agent.name || agent.id,
+    },
+  )
+  const selectedRecordEmptyMessage = t(
+    "pages.agent.organization.detail.live_logs_selected_record_empty",
+    {
+      defaultValue:
+        "No live logs reference {{record}} or its known agents yet.",
+      record: selectedRecord?.recordID ?? "",
     },
   )
 
@@ -200,8 +244,8 @@ export function LiveLogsPanel({ agent }: { agent: AgentOrganizationAgent }) {
           <Button
             type="button"
             size="sm"
-            variant={scopeMode === "selected" ? "secondary" : "ghost"}
-            onClick={() => setScopeMode("selected")}
+            variant={scopeMode === "selected-agent" ? "secondary" : "ghost"}
+            onClick={() => setScopeMode("selected-agent")}
           >
             {t("pages.agent.organization.detail.live_logs_selected", {
               defaultValue: "Selected Agent",
@@ -210,16 +254,36 @@ export function LiveLogsPanel({ agent }: { agent: AgentOrganizationAgent }) {
               {referencedLogCount}
             </span>
           </Button>
+          {selectedRecord ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={scopeMode === "selected-record" ? "secondary" : "ghost"}
+              onClick={() => setScopeMode("selected-record")}
+            >
+              {t(
+                "pages.agent.organization.detail.live_logs_selected_record",
+                "Selected Record",
+              )}
+              <span className="text-muted-foreground tabular-nums">
+                {recordLogCount}
+              </span>
+            </Button>
+          ) : null}
         </div>
       </div>
       <div className="min-h-0 flex-1">
         <LogsPanel
           logs={visibleLogs}
           emptyMessage={
-            scopeMode === "selected" ? selectedAgentEmptyMessage : undefined
+            scopeMode === "selected-agent"
+              ? selectedAgentEmptyMessage
+              : scopeMode === "selected-record"
+                ? selectedRecordEmptyMessage
+                : undefined
           }
           getLineReferenceFields={(line) =>
-            findAgentLogReferenceFields(line, agent.id)
+            findOrganizationLogCorrelationFields(line, correlationTarget)
           }
           wrapColumns={wrapColumns}
           contentRef={contentRef}
@@ -266,8 +330,8 @@ export function ActivityRecordDetailPanel({
     t("pages.agent.organization.detail.record_details", "Record details")
 
   return (
-    <div className="mb-4 rounded-lg border border-border/70 bg-muted/10">
-      <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border/70 px-3 py-3">
+    <div className="border-border/70 bg-muted/10 mb-4 rounded-lg border">
+      <div className="border-border/70 flex min-w-0 items-start justify-between gap-3 border-b px-3 py-3">
         <div className="min-w-0">
           <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
             {t(
@@ -362,7 +426,10 @@ function ActivityRecordDetailContent({
             }
           />
           <RecordFact
-            label={t("pages.agent.organization.detail.peer_agent_short", "Peer")}
+            label={t(
+              "pages.agent.organization.detail.peer_agent_short",
+              "Peer",
+            )}
             value={detail.peer_agent_id || detail.agent_id || unavailable(t)}
           />
           <RecordFact
@@ -380,7 +447,9 @@ function ActivityRecordDetailContent({
         </div>
       </DetailSection>
 
-      <DetailSection title={t("pages.agent.organization.detail.reason", "Reason")}>
+      <DetailSection
+        title={t("pages.agent.organization.detail.reason", "Reason")}
+      >
         <DetailText value={formatDiagnosticReason(detail, t)} />
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           <RecordFact
@@ -402,7 +471,11 @@ function ActivityRecordDetailContent({
               "pages.agent.organization.detail.current_status",
               "Current status",
             )}
-            value={formatDiagnosticFreshness(detail, detail.current === true, t)}
+            value={formatDiagnosticFreshness(
+              detail,
+              detail.current === true,
+              t,
+            )}
           />
         </div>
       </DetailSection>
@@ -504,7 +577,7 @@ function ActivityRecordDetailContent({
             {detail.participants.map((participant, index) => (
               <div
                 key={`${participant.agent_id ?? "participant"}:${index}`}
-                className="rounded-md border border-border/70 px-3 py-2"
+                className="border-border/70 rounded-md border px-3 py-2"
               >
                 <div className="grid gap-2 sm:grid-cols-2">
                   <RecordFact
@@ -515,7 +588,10 @@ function ActivityRecordDetailContent({
                     value={participant.agent_id || unavailable(t)}
                   />
                   <RecordFact
-                    label={t("pages.agent.organization.detail.status", "Status")}
+                    label={t(
+                      "pages.agent.organization.detail.status",
+                      "Status",
+                    )}
                     value={participant.status || unavailable(t)}
                   />
                   <RecordFact
@@ -526,7 +602,10 @@ function ActivityRecordDetailContent({
                     value={participant.delegation_id || unavailable(t)}
                   />
                   <RecordFact
-                    label={t("pages.agent.organization.detail.created", "Created")}
+                    label={t(
+                      "pages.agent.organization.detail.created",
+                      "Created",
+                    )}
                     value={formatTimestamp(participant.created_at, t)}
                   />
                 </div>
@@ -598,7 +677,7 @@ function DetailSection({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-md border border-border/70 bg-background/70 px-3 py-3">
+    <section className="border-border/70 bg-background/70 rounded-md border px-3 py-3">
       <h3 className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
         {title}
       </h3>
@@ -617,7 +696,7 @@ function DetailText({ label, value }: { label?: string; value?: string }) {
           {label}
         </div>
       ) : null}
-      <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5">
+      <div className="mt-0.5 text-xs leading-5 break-words whitespace-pre-wrap">
         {text}
       </div>
     </div>
@@ -757,6 +836,11 @@ function DelegationRecordItem({
           type: "delegation",
           recordID: record.delegation_id,
           sourceSection,
+          peerAgentIDs: uniqueIDs(
+            record.parent_agent_id,
+            record.requester_id,
+            record.target_agent_id,
+          ),
         }}
         onSelectRecord={onSelectRecord}
       />
@@ -854,9 +938,7 @@ function MeetingRecordItem({
     <ActivityRecordFrame status={record.status}>
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">
-            {title}
-          </div>
+          <div className="truncate text-sm font-medium">{title}</div>
           <div className="text-muted-foreground mt-0.5 truncate text-xs">
             {t("pages.agent.organization.detail.chair_agent", {
               defaultValue: "Chair: {{agent}}",
@@ -873,6 +955,11 @@ function MeetingRecordItem({
           type: "meeting",
           recordID: record.meeting_id,
           sourceSection: "meetings",
+          peerAgentIDs: uniqueIDs(
+            record.sponsor_agent_id,
+            record.chair_agent_id,
+            ...(record.participants ?? []),
+          ),
         }}
         onSelectRecord={onSelectRecord}
       />
@@ -1068,10 +1155,11 @@ function FailureRecordItem({
           type: record.type,
           recordID: record.record_id,
           sourceSection: "failures",
+          peerAgentIDs: uniqueIDs(record.agent_id),
         }}
         onSelectRecord={onSelectRecord}
       />
-      <div className="mt-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
+      <div className="border-border/70 bg-background/60 mt-3 rounded-md border px-3 py-2">
         <div className="text-muted-foreground text-[11px] leading-4">
           {t("pages.agent.organization.detail.failure_reason", "Reason")}
         </div>
@@ -1088,7 +1176,10 @@ function FailureRecordItem({
           value={freshness}
         />
         <RecordFact
-          label={t("pages.agent.organization.detail.severity_label", "Severity")}
+          label={t(
+            "pages.agent.organization.detail.severity_label",
+            "Severity",
+          )}
           value={severity}
         />
         <RecordFact
@@ -1147,6 +1238,10 @@ function sameActivityRecord(
   b: AgentOrganizationActivityRecord | undefined,
 ) {
   return Boolean(a && b && a.type === b.type && a.record_id === b.record_id)
+}
+
+function uniqueIDs(...ids: Array<string | undefined>) {
+  return Array.from(new Set(ids.filter((id): id is string => Boolean(id))))
 }
 
 export function RecentEventsPanel({

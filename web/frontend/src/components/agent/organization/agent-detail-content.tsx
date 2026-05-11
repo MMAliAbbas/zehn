@@ -16,15 +16,18 @@ import {
   AGENT_DETAIL_REFRESH_INTERVAL_MS,
 } from "./constants"
 import {
+  ActivityRecordDetailPanel,
   AgentOverviewPanel,
   DelegationRecordsPanel,
   FailureRecordsPanel,
-  ActivityRecordDetailPanel,
   LiveLogsPanel,
   MeetingRecordsPanel,
   RecentEventsPanel,
 } from "./detail-panels"
-import { detailTabForWorkbenchSection } from "./organization-state"
+import {
+  detailTabForWorkbenchSection,
+  selectOrganizationWorkbenchSection,
+} from "./organization-state"
 import type {
   AgentDetailTab,
   AgentSelectedActivityRecord,
@@ -156,7 +159,7 @@ export function AgentDetailContent({
             onSelectRecord={onSelectedRecordChange}
           />
         ) : activeTab === "live-logs" ? (
-          <LiveLogsPanel agent={agent} />
+          <LiveLogsPanel agent={agent} selectedRecord={selectedRecord} />
         ) : (
           <RecentEventsPanel agent={agent} />
         )}
@@ -187,8 +190,16 @@ export function StatefulAgentDetailContent({
   }, [agent.id, enabled, initialTab])
 
   const handleSectionChange = (section: AgentWorkbenchSection) => {
-    setActiveSection(section)
-    setSelectedRecord(null)
+    const next = selectOrganizationWorkbenchSection(
+      {
+        selectedAgentID: agent.id,
+        workbenchSection: activeSection,
+        selectedRecord,
+      },
+      section,
+    )
+    setActiveSection(next.workbenchSection)
+    setSelectedRecord(next.selectedRecord)
   }
 
   const handleSelectedRecordChange = (

@@ -1,6 +1,6 @@
 # Zehn Feature Automation Status
 
-Updated: 2026-05-09T04:18:32+05:00
+Updated: 2026-05-12T00:40:31+05:00
 
 This ledger is host-runner owned. A task is green only after its verification commands pass and related changes are reviewed according to the Zehn feature automation process.
 
@@ -56,9 +56,10 @@ This ledger is host-runner owned. A task is green only after its verification co
 | 046-organization-card-accessibility-controls | green | `runner-046-organization-card-accessibility-controls-20260509040348.log` | host verified |
 | 047-organization-configured-scope-totals | green | `runner-047-organization-configured-scope-totals-20260509040845.log` | host verified |
 | 048-organization-active-status-precedence | green | `runner-048-organization-active-status-precedence-20260509041349.log` | host verified |
+| 049-organization-diagnostic-summary-model | green | `runner-049-organization-diagnostic-summary-model-20260512002929.log` | host verified |
 
-Total green: 48 / 48
+Total green: 49 / 54
 
 ## Not Green In This Ledger
 
-All Zehn feature tasks have host-runner green evidence.
+`050-organization-safe-record-detail-api`, `051-organization-failure-reason-frontend`, `052-organization-record-detail-drilldown`, `053-organization-log-correlation`, `054-organization-diagnostics-verification`

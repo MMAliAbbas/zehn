@@ -203,10 +203,6 @@ func TestHandleAgentOrganization_NewerActiveDelegationSupersedesOlderFailure(t *
 	if httpRec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
 	}
-	if strings.Contains(httpRec.Body.String(), "private failure details") {
-		t.Fatalf("response leaked raw failure details: %s", httpRec.Body.String())
-	}
-
 	var resp agentOrganizationSnapshot
 	decodeJSONResponse(t, httpRec, &resp)
 	worker := resp.Agents["worker"]
@@ -400,6 +396,274 @@ func TestHandleAgentOrganization_LastFailureIncludesDrilldownMetadata(t *testing
 	}
 }
 
+func TestHandleAgentOrganization_DelegationFailureDiagnosticUsesRecordErrorFirst(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	failed := writeDelegationRecord(t, store, agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "raw task must not leak",
+	})
+	if err := store.RecordMemoryWrite(context.Background(), failed.DelegationID, agent.AgentDelegationMemoryWrite{
+		Provider: "yaad",
+		Status:   agent.AgentDelegationMemoryStatusFailed,
+		Error:    "secondary memory error must not win",
+	}); err != nil {
+		t.Fatalf("RecordMemoryWrite() error = %v", err)
+	}
+	if err := store.Failed(context.Background(), failed.DelegationID, errors.New("provider timed out token=secret-value")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	body := httpRec.Body.String()
+	for _, private := range []string{"raw task must not leak", "secret-value", "secondary memory error must not win"} {
+		if strings.Contains(body, private) {
+			t.Fatalf("response leaked or used lower-precedence content %q: %s", private, body)
+		}
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	current := resp.Agents["worker"].Activity.Current
+	if current == nil {
+		t.Fatal("worker current is nil, want failed delegation diagnostic")
+	}
+	if current.Reason != "provider timed out token=[redacted]" || current.ReasonSource != "record_error" {
+		t.Fatalf("diagnostic = reason %q source %q, want record error first", current.Reason, current.ReasonSource)
+	}
+	if current.Severity != "error" || !current.Current || current.Stale || !current.DetailAvailable {
+		t.Fatalf("diagnostic flags = %+v, want current error with details", current)
+	}
+	if current.Summary == "" {
+		t.Fatalf("summary is empty: %+v", current)
+	}
+}
+
+func TestHandleGetAgentFailures_DelegationDiagnosticsUseMemoryArtifactAndFallbackReasons(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+
+	memoryFailed := writeDelegationRecord(t, store, agent.AgentDelegationRequest{ParentAgentID: "lead", TargetAgentID: "worker"})
+	if err := store.RecordMemoryWrite(context.Background(), memoryFailed.DelegationID, agent.AgentDelegationMemoryWrite{
+		Provider: "yaad",
+		Status:   agent.AgentDelegationMemoryStatusFailed,
+		Error:    "yaad unavailable",
+	}); err != nil {
+		t.Fatalf("RecordMemoryWrite(memory) error = %v", err)
+	}
+	memoryFailed.Status = agent.AgentDelegationStatusFailed
+	memoryFailed.DurableMemory = &agent.AgentDelegationMemoryWrite{
+		Provider: "yaad",
+		Status:   agent.AgentDelegationMemoryStatusFailed,
+		Error:    "yaad unavailable",
+	}
+	setDelegationCreatedAt(t, cfg, &memoryFailed, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	artifactFailed := writeDelegationRecord(t, store, agent.AgentDelegationRequest{ParentAgentID: "lead", TargetAgentID: "worker"})
+	if err := store.RecordGitHubArtifact(context.Background(), artifactFailed.DelegationID, agent.AgentGitHubArtifactWrite{
+		Status: agent.AgentGitHubArtifactStatusFailed,
+		Error:  "github issue create failed",
+	}, nil); err != nil {
+		t.Fatalf("RecordGitHubArtifact() error = %v", err)
+	}
+	artifactFailed.Status = agent.AgentDelegationStatusFailed
+	artifactFailed.GitHubArtifact = &agent.AgentGitHubArtifactWrite{
+		Status: agent.AgentGitHubArtifactStatusFailed,
+		Error:  "github issue create failed",
+	}
+	setDelegationCreatedAt(t, cfg, &artifactFailed, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	fallbackFailed := writeDelegationRecord(t, store, agent.AgentDelegationRequest{ParentAgentID: "lead", TargetAgentID: "worker"})
+	fallbackFailed.Status = agent.AgentDelegationStatusFailed
+	setDelegationCreatedAt(t, cfg, &fallbackFailed, time.Date(2026, 5, 7, 11, 0, 0, 0, time.UTC))
+
+	httpRec := requestAgentActivity(t, configPath, "/api/agents/worker/failures")
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+
+	var resp agentActivityListResponse[agentOrganizationActivityRecord]
+	decodeJSONResponse(t, httpRec, &resp)
+	records := recordsByID(resp.Records)
+	assertDiagnostic(t, records[memoryFailed.DelegationID], "yaad unavailable", "memory_error", true)
+	assertDiagnostic(t, records[artifactFailed.DelegationID], "github issue create failed", "artifact_error", true)
+	assertDiagnostic(t, records[fallbackFailed.DelegationID], "Delegation status is failed", "status", true)
+}
+
+func TestHandleAgentOrganization_MeetingFailureDiagnosticUsesMeetingErrorFirst(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "sponsor", Name: "Sponsor"},
+			{ID: "chair", Name: "Chair"},
+			{ID: "participant", Name: "Participant"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	meeting := writeMeetingRecord(t, store, agent.AgentMeetingRequest{
+		Title:               "Risk Review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+		Goal:                "raw goal must not leak",
+	})
+	if err := store.AddParticipantTurn(context.Background(), meeting.MeetingID, agent.AgentMeetingTurn{
+		AgentID: "participant",
+		Status:  "failed",
+	}); err != nil {
+		t.Fatalf("AddParticipantTurn() error = %v", err)
+	}
+	if err := store.Failed(context.Background(), meeting.MeetingID, errors.New("chair synthesis failed")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+	if strings.Contains(httpRec.Body.String(), "raw goal must not leak") {
+		t.Fatalf("response leaked raw meeting goal: %s", httpRec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	current := resp.Agents["chair"].Activity.Current
+	if current == nil {
+		t.Fatal("chair current is nil, want failed meeting diagnostic")
+	}
+	if current.Reason != "chair synthesis failed" || current.ReasonSource != "record_error" {
+		t.Fatalf("diagnostic = reason %q source %q, want meeting error first", current.Reason, current.ReasonSource)
+	}
+}
+
+func TestHandleGetAgentFailures_MeetingDiagnosticsUseParticipantArtifactAndFallbackReasons(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "sponsor", Name: "Sponsor"},
+			{ID: "chair", Name: "Chair"},
+			{ID: "participant", Name: "Participant"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+
+	participantFailed := writeMeetingRecord(t, store, agent.AgentMeetingRequest{
+		Title:               "Participant review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+	})
+	if err := store.AddParticipantTurn(context.Background(), participantFailed.MeetingID, agent.AgentMeetingTurn{
+		AgentID: "participant",
+		Status:  "failed",
+	}); err != nil {
+		t.Fatalf("AddParticipantTurn() error = %v", err)
+	}
+	participantFailed.Status = agent.AgentMeetingStatusFailed
+	participantFailed.ParticipantTurns = []agent.AgentMeetingTurn{{AgentID: "participant", Status: "failed"}}
+	setMeetingCreatedAt(t, cfg, &participantFailed, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	artifactFailed := writeMeetingRecord(t, store, agent.AgentMeetingRequest{
+		Title:               "Artifact review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+	})
+	if err := store.RecordGitHubArtifact(context.Background(), artifactFailed.MeetingID, agent.AgentGitHubArtifactWrite{
+		Status: agent.AgentGitHubArtifactStatusFailed,
+		Error:  "github artifact failed",
+	}, nil); err != nil {
+		t.Fatalf("RecordGitHubArtifact() error = %v", err)
+	}
+	artifactFailed.Status = agent.AgentMeetingStatusFailed
+	artifactFailed.GitHubArtifact = &agent.AgentGitHubArtifactWrite{
+		Status: agent.AgentGitHubArtifactStatusFailed,
+		Error:  "github artifact failed",
+	}
+	setMeetingCreatedAt(t, cfg, &artifactFailed, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	fallbackFailed := writeMeetingRecord(t, store, agent.AgentMeetingRequest{
+		Title:               "Fallback review",
+		SponsorAgentID:      "sponsor",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"participant"},
+	})
+	fallbackFailed.Status = agent.AgentMeetingStatusFailed
+	setMeetingCreatedAt(t, cfg, &fallbackFailed, time.Date(2026, 5, 7, 11, 0, 0, 0, time.UTC))
+
+	httpRec := requestAgentActivity(t, configPath, "/api/agents/participant/failures")
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+
+	var resp agentActivityListResponse[agentOrganizationActivityRecord]
+	decodeJSONResponse(t, httpRec, &resp)
+	records := recordsByID(resp.Records)
+	assertDiagnostic(t, records[participantFailed.MeetingID], "Participant participant failed", "participant_turn", true)
+	assertDiagnostic(t, records[artifactFailed.MeetingID], "github artifact failed", "artifact_error", true)
+	assertDiagnostic(t, records[fallbackFailed.MeetingID], "Meeting status is failed", "status", true)
+}
+
+func TestHandleAgentOrganization_StaleHistoricalFailureDiagnostic(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+	store := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	failed := writeDelegationRecord(t, store, agent.AgentDelegationRequest{ParentAgentID: "lead", TargetAgentID: "worker"})
+	if err := store.Failed(context.Background(), failed.DelegationID, errors.New("old failure")); err != nil {
+		t.Fatalf("Failed() error = %v", err)
+	}
+	failed.Status = agent.AgentDelegationStatusFailed
+	failed.Error = &agent.AgentDelegationRecordError{Message: "old failure"}
+	setDelegationCreatedAt(t, cfg, &failed, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	active := writeDelegationRecord(t, store, agent.AgentDelegationRequest{ParentAgentID: "lead", TargetAgentID: "worker"})
+	if err := store.Running(context.Background(), active.DelegationID); err != nil {
+		t.Fatalf("Running() error = %v", err)
+	}
+	active.Status = agent.AgentDelegationStatusRunning
+	setDelegationCreatedAt(t, cfg, &active, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	httpRec := requestAgentOrganization(t, configPath)
+	if httpRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
+	}
+
+	var resp agentOrganizationSnapshot
+	decodeJSONResponse(t, httpRec, &resp)
+	lastFailure := resp.Agents["worker"].Activity.LastFailure
+	if lastFailure == nil {
+		t.Fatal("last failure is nil, want stale diagnostic")
+	}
+	if lastFailure.Current || !lastFailure.Stale || lastFailure.ReasonSource != "record_error" {
+		t.Fatalf("last failure diagnostic = %+v, want stale historical record error", lastFailure)
+	}
+	current := resp.Agents["worker"].Activity.Current
+	if current == nil || !current.Current || current.Stale {
+		t.Fatalf("current diagnostic = %+v, want current non-stale activity", current)
+	}
+}
+
 func TestHandleGetAgentFailures_ReturnsRecentVisibleDelegationAndMeetingFailures(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{
@@ -466,9 +730,7 @@ func TestHandleGetAgentFailures_ReturnsRecentVisibleDelegationAndMeetingFailures
 	body := httpRec.Body.String()
 	for _, private := range []string{
 		"private failed delegation",
-		"private delegation failure details",
 		"private failed meeting goal",
-		"private meeting failure details",
 		"private unrelated meeting goal",
 		"private unrelated failure details",
 	} {
@@ -540,10 +802,6 @@ func TestHandleAgentOrganization_NewerFailureRemainsCurrentWithoutNewerActiveRec
 	if httpRec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
 	}
-	if strings.Contains(httpRec.Body.String(), "private failure details") {
-		t.Fatalf("response leaked raw failure details: %s", httpRec.Body.String())
-	}
-
 	var resp agentOrganizationSnapshot
 	decodeJSONResponse(t, httpRec, &resp)
 	if status := resp.Agents["worker"].Status; status != agentOrganizationStatusFailed {
@@ -675,7 +933,7 @@ func TestHandleAgentOrganization_ActivityFeedSummarizesRecentOrgEvents(t *testin
 		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
 	}
 	body := httpRec.Body.String()
-	for _, private := range []string{"private failure prompt", "private running prompt", "private meeting goal", "private failure details"} {
+	for _, private := range []string{"private failure prompt", "private running prompt", "private meeting goal"} {
 		if strings.Contains(body, private) {
 			t.Fatalf("response leaked private content %q: %s", private, body)
 		}
@@ -740,7 +998,7 @@ func TestHandleAgentOrganization_ActivityFeedClassifiesMeetingFailuresAsFailures
 	if httpRec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body=%s", httpRec.Code, http.StatusOK, httpRec.Body.String())
 	}
-	for _, private := range []string{"private meeting failure goal", "private meeting failure details"} {
+	for _, private := range []string{"private meeting failure goal"} {
 		if strings.Contains(httpRec.Body.String(), private) {
 			t.Fatalf("response leaked private meeting failure content %q: %s", private, httpRec.Body.String())
 		}
@@ -844,7 +1102,6 @@ func TestHandleAgentOrganization_SummaryIgnoresRecordsWithoutConfiguredAgents(t 
 		"former-sponsor",
 		"former-chair",
 		"former-participant",
-		"visible failure details",
 	} {
 		if strings.Contains(body, private) {
 			t.Fatalf("response leaked stale or private content %q: %s", private, body)
@@ -1134,6 +1391,40 @@ func agentNodeIDs(nodes []agentOrganizationNode) []string {
 		ids = append(ids, node.ID)
 	}
 	return ids
+}
+
+func recordsByID(records []agentOrganizationActivityRecord) map[string]agentOrganizationActivityRecord {
+	out := make(map[string]agentOrganizationActivityRecord, len(records))
+	for _, record := range records {
+		out[record.RecordID] = record
+	}
+	return out
+}
+
+func assertDiagnostic(
+	t *testing.T,
+	record agentOrganizationActivityRecord,
+	wantReason string,
+	wantSource string,
+	wantDetailAvailable bool,
+) {
+	t.Helper()
+
+	if record.RecordID == "" {
+		t.Fatalf("record is empty, want diagnostic reason %q source %q", wantReason, wantSource)
+	}
+	if record.Reason != wantReason || record.ReasonSource != wantSource {
+		t.Fatalf("record %s diagnostic = reason %q source %q, want reason %q source %q", record.RecordID, record.Reason, record.ReasonSource, wantReason, wantSource)
+	}
+	if record.Severity != "error" {
+		t.Fatalf("record %s severity = %q, want error", record.RecordID, record.Severity)
+	}
+	if record.DetailAvailable != wantDetailAvailable {
+		t.Fatalf("record %s detail_available = %v, want %v", record.RecordID, record.DetailAvailable, wantDetailAvailable)
+	}
+	if record.Summary == "" {
+		t.Fatalf("record %s summary is empty", record.RecordID)
+	}
 }
 
 func setMeetingCreatedAt(

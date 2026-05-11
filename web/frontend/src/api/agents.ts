@@ -15,6 +15,13 @@ export interface AgentOrganizationActivityRecord {
   role?: string
   agent_id?: string
   artifact_refs?: string[]
+  summary?: string
+  reason?: string
+  reason_source?: string
+  severity?: string
+  current?: boolean
+  stale?: boolean
+  detail_available?: boolean
   created_at?: string
   updated_at?: string
   completed_at?: string
@@ -68,6 +75,12 @@ export interface AgentOrganizationActivityFeed {
   record_id?: string
   status?: string
   summary?: string
+  reason?: string
+  reason_source?: string
+  severity?: string
+  current?: boolean
+  stale?: boolean
+  detail_available?: boolean
   timestamp?: string
 }
 
@@ -101,6 +114,13 @@ export interface AgentDelegationActivityRecord {
   mode?: string
   priority?: string
   artifact_refs?: string[]
+  summary?: string
+  reason?: string
+  reason_source?: string
+  severity?: string
+  current?: boolean
+  stale?: boolean
+  detail_available?: boolean
   created_at: string
   updated_at: string
   started_at?: string
@@ -116,6 +136,13 @@ export interface AgentMeetingActivityRecord {
   participants?: string[]
   role: string
   artifact_refs?: string[]
+  summary?: string
+  reason?: string
+  reason_source?: string
+  severity?: string
+  current?: boolean
+  stale?: boolean
+  detail_available?: boolean
   created_at: string
   updated_at: string
   completed_at?: string

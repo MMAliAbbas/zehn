@@ -71,15 +71,22 @@ type agentOrganizationAgentActivity struct {
 }
 
 type agentOrganizationActivityRecord struct {
-	Type         string     `json:"type"`
-	RecordID     string     `json:"record_id"`
-	Status       string     `json:"status"`
-	Role         string     `json:"role,omitempty"`
-	AgentID      string     `json:"agent_id,omitempty"`
-	ArtifactRefs []string   `json:"artifact_refs,omitempty"`
-	CreatedAt    *time.Time `json:"created_at,omitempty"`
-	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	Type            string     `json:"type"`
+	RecordID        string     `json:"record_id"`
+	Status          string     `json:"status"`
+	Role            string     `json:"role,omitempty"`
+	AgentID         string     `json:"agent_id,omitempty"`
+	ArtifactRefs    []string   `json:"artifact_refs,omitempty"`
+	Summary         string     `json:"summary,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	ReasonSource    string     `json:"reason_source,omitempty"`
+	Severity        string     `json:"severity,omitempty"`
+	Current         bool       `json:"current,omitempty"`
+	Stale           bool       `json:"stale,omitempty"`
+	DetailAvailable bool       `json:"detail_available,omitempty"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
 type agentOrganizationRecentEvent struct {
@@ -100,12 +107,18 @@ type agentOrganizationActivitySummary struct {
 }
 
 type agentOrganizationActivityFeed struct {
-	Type      string     `json:"type"`
-	AgentID   string     `json:"agent_id,omitempty"`
-	RecordID  string     `json:"record_id,omitempty"`
-	Status    string     `json:"status,omitempty"`
-	Summary   string     `json:"summary,omitempty"`
-	Timestamp *time.Time `json:"timestamp,omitempty"`
+	Type            string     `json:"type"`
+	AgentID         string     `json:"agent_id,omitempty"`
+	RecordID        string     `json:"record_id,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	Summary         string     `json:"summary,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	ReasonSource    string     `json:"reason_source,omitempty"`
+	Severity        string     `json:"severity,omitempty"`
+	Current         bool       `json:"current,omitempty"`
+	Stale           bool       `json:"stale,omitempty"`
+	DetailAvailable bool       `json:"detail_available,omitempty"`
+	Timestamp       *time.Time `json:"timestamp,omitempty"`
 }
 
 type agentActivityListResponse[T any] struct {
@@ -116,33 +129,47 @@ type agentActivityListResponse[T any] struct {
 }
 
 type agentDelegationActivitySummary struct {
-	DelegationID  string     `json:"delegation_id"`
-	Status        string     `json:"status"`
-	ParentAgentID string     `json:"parent_agent_id"`
-	TargetAgentID string     `json:"target_agent_id"`
-	RequesterID   string     `json:"requester_id,omitempty"`
-	Role          string     `json:"role"`
-	Mode          string     `json:"mode,omitempty"`
-	Priority      string     `json:"priority,omitempty"`
-	ArtifactRefs  []string   `json:"artifact_refs,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	DelegationID    string     `json:"delegation_id"`
+	Status          string     `json:"status"`
+	ParentAgentID   string     `json:"parent_agent_id"`
+	TargetAgentID   string     `json:"target_agent_id"`
+	RequesterID     string     `json:"requester_id,omitempty"`
+	Role            string     `json:"role"`
+	Mode            string     `json:"mode,omitempty"`
+	Priority        string     `json:"priority,omitempty"`
+	ArtifactRefs    []string   `json:"artifact_refs,omitempty"`
+	Summary         string     `json:"summary,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	ReasonSource    string     `json:"reason_source,omitempty"`
+	Severity        string     `json:"severity,omitempty"`
+	Current         bool       `json:"current,omitempty"`
+	Stale           bool       `json:"stale,omitempty"`
+	DetailAvailable bool       `json:"detail_available,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
 type agentMeetingActivitySummary struct {
-	MeetingID      string     `json:"meeting_id"`
-	Status         string     `json:"status"`
-	Title          string     `json:"title,omitempty"`
-	SponsorAgentID string     `json:"sponsor_agent_id"`
-	ChairAgentID   string     `json:"chair_agent_id"`
-	Participants   []string   `json:"participants,omitempty"`
-	Role           string     `json:"role"`
-	ArtifactRefs   []string   `json:"artifact_refs,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	MeetingID       string     `json:"meeting_id"`
+	Status          string     `json:"status"`
+	Title           string     `json:"title,omitempty"`
+	SponsorAgentID  string     `json:"sponsor_agent_id"`
+	ChairAgentID    string     `json:"chair_agent_id"`
+	Participants    []string   `json:"participants,omitempty"`
+	Role            string     `json:"role"`
+	ArtifactRefs    []string   `json:"artifact_refs,omitempty"`
+	Summary         string     `json:"summary,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	ReasonSource    string     `json:"reason_source,omitempty"`
+	Severity        string     `json:"severity,omitempty"`
+	Current         bool       `json:"current,omitempty"`
+	Stale           bool       `json:"stale,omitempty"`
+	DetailAvailable bool       `json:"detail_available,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
 type agentOrganizationBuildState struct {
@@ -229,6 +256,9 @@ func (h *Handler) handleGetAgentInbox(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range newestDelegationRecords(records, limit) {
 		summaries = append(summaries, summarizeDelegationActivity(rec, agentID, "target"))
 	}
+	if snapshot, err := buildAgentOrganizationSnapshot(r.Context(), cfg); err == nil {
+		annotateDelegationSummaries(summaries, snapshot.Agents[agentID].Activity)
+	}
 	writeAgentActivityResponse(w, agentActivityListResponse[agentDelegationActivitySummary]{
 		AgentID: agentID,
 		Kind:    "inbox",
@@ -262,6 +292,9 @@ func (h *Handler) handleGetAgentOutbox(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range newestDelegationRecords(related, limit) {
 		summaries = append(summaries, summarizeDelegationActivity(rec, agentID, "requester"))
 	}
+	if snapshot, err := buildAgentOrganizationSnapshot(r.Context(), cfg); err == nil {
+		annotateDelegationSummaries(summaries, snapshot.Agents[agentID].Activity)
+	}
 	writeAgentActivityResponse(w, agentActivityListResponse[agentDelegationActivitySummary]{
 		AgentID: agentID,
 		Kind:    "outbox",
@@ -294,6 +327,9 @@ func (h *Handler) handleGetAgentMeetings(w http.ResponseWriter, r *http.Request)
 	summaries := make([]agentMeetingActivitySummary, 0, min(len(related), limit))
 	for _, rec := range newestMeetingRecords(related, limit) {
 		summaries = append(summaries, summarizeMeetingActivity(rec, agentID))
+	}
+	if snapshot, err := buildAgentOrganizationSnapshot(r.Context(), cfg); err == nil {
+		annotateMeetingSummaries(summaries, snapshot.Agents[agentID].Activity)
 	}
 	writeAgentActivityResponse(w, agentActivityListResponse[agentMeetingActivitySummary]{
 		AgentID: agentID,
@@ -345,6 +381,9 @@ func (h *Handler) handleGetAgentFailures(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		records = append(records, summarizeMeetingFailureActivity(rec, agentID))
+	}
+	if snapshot, err := buildAgentOrganizationSnapshot(r.Context(), cfg); err == nil {
+		annotateActivityRecords(records, snapshot.Agents[agentID].Activity)
 	}
 
 	writeAgentActivityResponse(w, agentActivityListResponse[agentOrganizationActivityRecord]{
@@ -454,20 +493,26 @@ func summarizeDelegationActivity(
 	if role == "" {
 		role = delegationRoleForAgent(rec, agentID)
 	}
+	diagnostic := delegationDiagnostic(rec)
 	return agentDelegationActivitySummary{
-		DelegationID:  rec.DelegationID,
-		Status:        string(rec.Status),
-		ParentAgentID: rec.ParentAgentID,
-		TargetAgentID: rec.TargetAgentID,
-		RequesterID:   delegationRequesterID(rec),
-		Role:          role,
-		Mode:          rec.Request.Mode,
-		Priority:      rec.Request.Priority,
-		ArtifactRefs:  append([]string(nil), rec.Request.ArtifactRefs...),
-		CreatedAt:     rec.CreatedAt,
-		UpdatedAt:     rec.UpdatedAt,
-		StartedAt:     rec.StartedAt,
-		CompletedAt:   rec.CompletedAt,
+		DelegationID:    rec.DelegationID,
+		Status:          string(rec.Status),
+		ParentAgentID:   rec.ParentAgentID,
+		TargetAgentID:   rec.TargetAgentID,
+		RequesterID:     delegationRequesterID(rec),
+		Role:            role,
+		Mode:            rec.Request.Mode,
+		Priority:        rec.Request.Priority,
+		ArtifactRefs:    append([]string(nil), rec.Request.ArtifactRefs...),
+		Summary:         diagnostic.Summary,
+		Reason:          diagnostic.Reason,
+		ReasonSource:    diagnostic.ReasonSource,
+		Severity:        diagnostic.Severity,
+		DetailAvailable: true,
+		CreatedAt:       rec.CreatedAt,
+		UpdatedAt:       rec.UpdatedAt,
+		StartedAt:       rec.StartedAt,
+		CompletedAt:     rec.CompletedAt,
 	}
 }
 
@@ -485,6 +530,7 @@ func summarizeDelegationFailureActivity(
 		rec.CompletedAt,
 		rec.Request.ArtifactRefs,
 	)
+	activity.applyDiagnostic(delegationDiagnostic(rec))
 	activity.Role = role
 	if role == "target" {
 		activity.AgentID = delegationRequesterID(rec)
@@ -507,18 +553,24 @@ func delegationRoleForAgent(rec agent.AgentDelegationRecord, agentID string) str
 
 func summarizeMeetingActivity(rec agent.AgentMeetingRecord, agentID string) agentMeetingActivitySummary {
 	role := meetingParticipantIDs(rec)[agentID]
+	diagnostic := meetingDiagnostic(rec)
 	return agentMeetingActivitySummary{
-		MeetingID:      rec.MeetingID,
-		Status:         string(rec.Status),
-		Title:          rec.Title,
-		SponsorAgentID: rec.SponsorAgentID,
-		ChairAgentID:   rec.ChairAgentID,
-		Participants:   append([]string(nil), rec.Participants...),
-		Role:           role,
-		ArtifactRefs:   append([]string(nil), rec.ArtifactRefs...),
-		CreatedAt:      rec.CreatedAt,
-		UpdatedAt:      rec.UpdatedAt,
-		CompletedAt:    rec.CompletedAt,
+		MeetingID:       rec.MeetingID,
+		Status:          string(rec.Status),
+		Title:           rec.Title,
+		SponsorAgentID:  rec.SponsorAgentID,
+		ChairAgentID:    rec.ChairAgentID,
+		Participants:    append([]string(nil), rec.Participants...),
+		Role:            role,
+		ArtifactRefs:    append([]string(nil), rec.ArtifactRefs...),
+		Summary:         diagnostic.Summary,
+		Reason:          diagnostic.Reason,
+		ReasonSource:    diagnostic.ReasonSource,
+		Severity:        diagnostic.Severity,
+		DetailAvailable: true,
+		CreatedAt:       rec.CreatedAt,
+		UpdatedAt:       rec.UpdatedAt,
+		CompletedAt:     rec.CompletedAt,
 	}
 }
 
@@ -532,6 +584,7 @@ func summarizeMeetingFailureActivity(rec agent.AgentMeetingRecord, agentID strin
 		rec.CompletedAt,
 		rec.ArtifactRefs,
 	)
+	activity.applyDiagnostic(meetingDiagnostic(rec))
 	activity.Role = meetingParticipantIDs(rec)[agentID]
 	switch activity.Role {
 	case "chair":
@@ -581,6 +634,7 @@ func buildAgentOrganizationSnapshot(ctx context.Context, cfg *config.Config) (ag
 		meetings:    meetings,
 	}
 	state.applyActivity()
+	state.annotateActivityCurrency()
 	recentEvents := gatewayLogRecentEvents(state.agents)
 	state.applyRecentEvents(recentEvents)
 	state.summary.Recent = state.recentActivityFeed(recentEvents)
@@ -804,6 +858,7 @@ func (s *agentOrganizationBuildState) applyDelegationRecord(rec agent.AgentDeleg
 		rec.CompletedAt,
 		rec.Request.ArtifactRefs,
 	)
+	activity.applyDiagnostic(delegationDiagnostic(rec))
 
 	if target := s.agents[targetID]; target != nil {
 		target.Activity.InboxCount++
@@ -838,13 +893,21 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 		if rec.Status == agent.AgentDelegationStatusFailed {
 			entryType = "failure"
 		}
+		diagnostic := delegationDiagnostic(rec)
+		current, stale := s.feedCurrency(agentID, "delegation", rec.DelegationID)
 		feed = append(feed, agentOrganizationActivityFeed{
-			Type:      entryType,
-			AgentID:   agentID,
-			RecordID:  rec.DelegationID,
-			Status:    string(rec.Status),
-			Summary:   delegationFeedSummary(rec),
-			Timestamp: timePointer(rec.UpdatedAt),
+			Type:            entryType,
+			AgentID:         agentID,
+			RecordID:        rec.DelegationID,
+			Status:          string(rec.Status),
+			Summary:         diagnostic.Summary,
+			Reason:          diagnostic.Reason,
+			ReasonSource:    diagnostic.ReasonSource,
+			Severity:        diagnostic.Severity,
+			Current:         current,
+			Stale:           stale,
+			DetailAvailable: true,
+			Timestamp:       timePointer(rec.UpdatedAt),
 		})
 	}
 	for _, rec := range s.meetings {
@@ -856,13 +919,21 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 		if rec.Status == agent.AgentMeetingStatusFailed {
 			entryType = "failure"
 		}
+		diagnostic := meetingDiagnostic(rec)
+		current, stale := s.feedCurrency(agentID, "meeting", rec.MeetingID)
 		feed = append(feed, agentOrganizationActivityFeed{
-			Type:      entryType,
-			AgentID:   agentID,
-			RecordID:  rec.MeetingID,
-			Status:    string(rec.Status),
-			Summary:   meetingFeedSummary(rec),
-			Timestamp: timePointer(rec.UpdatedAt),
+			Type:            entryType,
+			AgentID:         agentID,
+			RecordID:        rec.MeetingID,
+			Status:          string(rec.Status),
+			Summary:         diagnostic.Summary,
+			Reason:          diagnostic.Reason,
+			ReasonSource:    diagnostic.ReasonSource,
+			Severity:        diagnostic.Severity,
+			Current:         current,
+			Stale:           stale,
+			DetailAvailable: true,
+			Timestamp:       timePointer(rec.UpdatedAt),
 		})
 	}
 	for agentID, events := range recentEvents {
@@ -892,6 +963,21 @@ func (s *agentOrganizationBuildState) recentActivityFeed(
 		feed = feed[:agentOrganizationActivityFeedLimit]
 	}
 	return feed
+}
+
+func (s *agentOrganizationBuildState) feedCurrency(agentID string, recordType string, recordID string) (bool, bool) {
+	agentState := s.agents[agentID]
+	if agentState == nil {
+		return false, false
+	}
+	current := agentState.Activity.Current
+	if current == nil {
+		return false, false
+	}
+	if current.Type == recordType && current.RecordID == recordID {
+		return true, false
+	}
+	return false, true
 }
 
 func (s *agentOrganizationBuildState) configuredDelegationAgentID(rec agent.AgentDelegationRecord) string {
@@ -926,12 +1012,206 @@ func (s *agentOrganizationBuildState) configuredMeetingAgentID(rec agent.AgentMe
 	return ""
 }
 
-func delegationFeedSummary(rec agent.AgentDelegationRecord) string {
-	return fmt.Sprintf("Delegation %s: %s -> %s", rec.Status, delegationRequesterID(rec), rec.TargetAgentID)
+type activityDiagnostic struct {
+	Summary      string
+	Reason       string
+	ReasonSource string
+	Severity     string
 }
 
-func meetingFeedSummary(rec agent.AgentMeetingRecord) string {
-	return fmt.Sprintf("Meeting %s: %s", rec.Status, firstNonEmpty(rec.Title, rec.MeetingID))
+func (r *agentOrganizationActivityRecord) applyDiagnostic(d activityDiagnostic) {
+	if r == nil {
+		return
+	}
+	r.Summary = d.Summary
+	r.Reason = d.Reason
+	r.ReasonSource = d.ReasonSource
+	r.Severity = d.Severity
+	r.DetailAvailable = true
+}
+
+func delegationDiagnostic(rec agent.AgentDelegationRecord) activityDiagnostic {
+	summary := compactDiagnosticText(fmt.Sprintf(
+		"Delegation %s: %s -> %s",
+		rec.Status,
+		delegationRequesterID(rec),
+		strings.TrimSpace(rec.TargetAgentID),
+	))
+	reason, source := delegationDiagnosticReason(rec)
+	return activityDiagnostic{
+		Summary:      summary,
+		Reason:       reason,
+		ReasonSource: source,
+		Severity:     severityForActivityStatus(string(rec.Status), reason),
+	}
+}
+
+func delegationDiagnosticReason(rec agent.AgentDelegationRecord) (string, string) {
+	if rec.Error != nil {
+		if reason := compactDiagnosticText(rec.Error.Message); reason != "" {
+			return reason, "record_error"
+		}
+	}
+	if rec.DurableMemory != nil && rec.DurableMemory.Status == agent.AgentDelegationMemoryStatusFailed {
+		if reason := compactDiagnosticText(rec.DurableMemory.Error); reason != "" {
+			return reason, "memory_error"
+		}
+		return "Durable memory write failed", "memory_error"
+	}
+	if rec.GitHubArtifact != nil && rec.GitHubArtifact.Status == agent.AgentGitHubArtifactStatusFailed {
+		if reason := compactDiagnosticText(rec.GitHubArtifact.Error); reason != "" {
+			return reason, "artifact_error"
+		}
+		return "Artifact write failed", "artifact_error"
+	}
+	if rec.Status == agent.AgentDelegationStatusFailed {
+		return "Delegation status is failed", "status"
+	}
+	return "", ""
+}
+
+func meetingDiagnostic(rec agent.AgentMeetingRecord) activityDiagnostic {
+	summary := compactDiagnosticText(fmt.Sprintf(
+		"Meeting %s: %s",
+		rec.Status,
+		firstNonEmpty(rec.Title, rec.MeetingID),
+	))
+	reason, source := meetingDiagnosticReason(rec)
+	return activityDiagnostic{
+		Summary:      summary,
+		Reason:       reason,
+		ReasonSource: source,
+		Severity:     severityForActivityStatus(string(rec.Status), reason),
+	}
+}
+
+func meetingDiagnosticReason(rec agent.AgentMeetingRecord) (string, string) {
+	if reason := compactDiagnosticText(rec.Error); reason != "" {
+		return reason, "record_error"
+	}
+	for _, turn := range rec.ParticipantTurns {
+		if strings.EqualFold(strings.TrimSpace(turn.Status), "failed") ||
+			strings.EqualFold(strings.TrimSpace(turn.Status), "error") {
+			agentID := strings.TrimSpace(turn.AgentID)
+			if agentID == "" {
+				return "Participant turn failed", "participant_turn"
+			}
+			return compactDiagnosticText("Participant " + agentID + " failed"), "participant_turn"
+		}
+	}
+	if rec.GitHubArtifact != nil && rec.GitHubArtifact.Status == agent.AgentGitHubArtifactStatusFailed {
+		if reason := compactDiagnosticText(rec.GitHubArtifact.Error); reason != "" {
+			return reason, "artifact_error"
+		}
+		return "Artifact write failed", "artifact_error"
+	}
+	if rec.Status == agent.AgentMeetingStatusFailed {
+		return "Meeting status is failed", "status"
+	}
+	return "", ""
+}
+
+func severityForActivityStatus(status string, reason string) string {
+	switch strings.TrimSpace(status) {
+	case "failed":
+		return "error"
+	case "cancelled":
+		return "warning"
+	default:
+		if strings.TrimSpace(reason) != "" {
+			return "warning"
+		}
+		return "info"
+	}
+}
+
+func compactDiagnosticText(text string) string {
+	text = sanitizeRecentEventMessage(text)
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return ""
+	}
+	const maxDiagnosticText = 140
+	if len(text) <= maxDiagnosticText {
+		return text
+	}
+	return strings.TrimSpace(text[:maxDiagnosticText-3]) + "..."
+}
+
+func (s *agentOrganizationBuildState) annotateActivityCurrency() {
+	for _, agentState := range s.agents {
+		if agentState == nil {
+			continue
+		}
+		annotateAgentActivityCurrency(&agentState.Activity)
+	}
+}
+
+func annotateAgentActivityCurrency(activity *agentOrganizationAgentActivity) {
+	if activity == nil {
+		return
+	}
+	if activity.Current != nil {
+		activity.Current.Current = true
+		activity.Current.Stale = false
+	}
+	if activity.LastFailure != nil {
+		activity.LastFailure.Current = sameActivityRecord(activity.LastFailure, activity.Current)
+		activity.LastFailure.Stale = !activity.LastFailure.Current && newerCurrentActivityExists(activity.Current, activity.LastFailure)
+	}
+}
+
+func annotateActivityRecords(records []agentOrganizationActivityRecord, activity agentOrganizationAgentActivity) {
+	for i := range records {
+		annotateActivityRecordCurrency(&records[i], activity)
+	}
+}
+
+func annotateActivityRecordCurrency(record *agentOrganizationActivityRecord, activity agentOrganizationAgentActivity) {
+	if record == nil {
+		return
+	}
+	record.Current = sameActivityRecord(record, activity.Current)
+	record.Stale = !record.Current && newerCurrentActivityExists(activity.Current, record)
+}
+
+func annotateDelegationSummaries(records []agentDelegationActivitySummary, activity agentOrganizationAgentActivity) {
+	for i := range records {
+		record := &records[i]
+		current := activity.Current
+		record.Current = current != nil && current.Type == "delegation" && current.RecordID == record.DelegationID
+		record.Stale = !record.Current && summaryUpdatedBeforeCurrent(current, record.UpdatedAt)
+	}
+}
+
+func annotateMeetingSummaries(records []agentMeetingActivitySummary, activity agentOrganizationAgentActivity) {
+	for i := range records {
+		record := &records[i]
+		current := activity.Current
+		record.Current = current != nil && current.Type == "meeting" && current.RecordID == record.MeetingID
+		record.Stale = !record.Current && summaryUpdatedBeforeCurrent(current, record.UpdatedAt)
+	}
+}
+
+func sameActivityRecord(a *agentOrganizationActivityRecord, b *agentOrganizationActivityRecord) bool {
+	return a != nil && b != nil && a.Type == b.Type && a.RecordID == b.RecordID
+}
+
+func newerCurrentActivityExists(current *agentOrganizationActivityRecord, record *agentOrganizationActivityRecord) bool {
+	if current == nil || record == nil {
+		return false
+	}
+	if sameActivityRecord(current, record) {
+		return false
+	}
+	return activityRecordUnixNano(*current) >= activityRecordUnixNano(*record)
+}
+
+func summaryUpdatedBeforeCurrent(current *agentOrganizationActivityRecord, updatedAt time.Time) bool {
+	if current == nil || updatedAt.IsZero() || current.UpdatedAt == nil {
+		return false
+	}
+	return !updatedAt.After(*current.UpdatedAt)
 }
 
 func feedEntryUnixNano(entry agentOrganizationActivityFeed) int64 {
@@ -969,6 +1249,7 @@ func (s *agentOrganizationBuildState) applyMeetingRecord(rec agent.AgentMeetingR
 		rec.CompletedAt,
 		rec.ArtifactRefs,
 	)
+	activity.applyDiagnostic(meetingDiagnostic(rec))
 	for agentID, role := range participantIDs {
 		agentState := s.agents[agentID]
 		if agentState == nil {

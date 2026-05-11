@@ -129,6 +129,12 @@ highlighting the selected agent and record id.
 4. Frontend record detail drilldown.
 5. Live-log correlation for selected diagnostic records.
 6. Final diagnostics verification and documentation.
+7. Diagnostics hardening from review findings:
+   - replace raw record excerpts in detail responses with stricter diagnostic
+     summaries or explicitly labeled excerpts;
+   - make selected-record log correlation semantics match the UI label;
+   - avoid unnecessary full-snapshot rebuilds in per-agent activity handlers
+     when current/stale annotations can be derived more directly.
 
 ## Safety Gates
 
@@ -143,4 +149,3 @@ No task should:
 - add external side effects
 - expose secrets or large prompt/result bodies
 - require operator downtime
-

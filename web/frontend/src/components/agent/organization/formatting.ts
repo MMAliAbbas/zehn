@@ -9,6 +9,9 @@ import type {
 
 import type { OrderedNode } from "./types"
 
+export const DETAIL_TEXT_CLASS =
+  "mt-0.5 max-h-32 overflow-y-auto text-xs leading-5 break-words whitespace-pre-wrap"
+
 export function buildOrderedRoots(
   snapshot: AgentOrganizationSnapshot | undefined,
 ): OrderedNode[] {

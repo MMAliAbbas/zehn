@@ -25,6 +25,7 @@ import { useGatewayLogs } from "@/hooks/use-gateway-logs"
 import { useLogWrapColumns } from "@/hooks/use-log-wrap-columns"
 
 import {
+  DETAIL_TEXT_CLASS,
   buildFailureDrilldownRecords,
   compactActivityEvents,
   errorMessage,
@@ -696,9 +697,7 @@ function DetailText({ label, value }: { label?: string; value?: string }) {
           {label}
         </div>
       ) : null}
-      <div className="mt-0.5 text-xs leading-5 break-words whitespace-pre-wrap">
-        {text}
-      </div>
+      <div className={DETAIL_TEXT_CLASS}>{text}</div>
     </div>
   )
 }

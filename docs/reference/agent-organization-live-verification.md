@@ -242,6 +242,56 @@ Expected result:
 - Failure details are redacted to record status and identifiers; private error
   strings do not appear in launcher responses.
 
+### 4a. Diagnostic Drilldown Path
+
+Use local fixture records or retained test records that include one failed
+delegation and one failed meeting for the same configured agent. Prefer copying
+known-safe fixture JSON into a disposable workspace over triggering new runtime
+work when the goal is UI verification.
+
+Check the full operator path without pressing any runtime action:
+
+```bash
+curl -fsS "$LAUNCHER_URL/api/agents/organization"
+curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/failures"
+curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/activity/delegation/$DELEGATION_ID"
+curl -fsS "$LAUNCHER_URL/api/agents/$AGENT_ID/activity/meeting/$MEETING_ID"
+```
+
+Expected result:
+
+- The affected card shows `Failed` only when the failure is the current
+  structured record. If newer running, started, or completed activity exists,
+  the card follows that newer activity while the failure remains visible as a
+  historical failure.
+- The card shows a short failure reason when the current record has diagnostic
+  fields. Old records without diagnostic fields still render with stable
+  fallback copy instead of blank or broken UI.
+- The Errors count opens the Failures tab. The tab labels current failures as
+  current and older failures as historical, shows reason, source, severity,
+  peer, role, timestamps, artifact count, and a Details action when detail is
+  available.
+- Record detail shows bounded summaries for request, context, result, memory
+  errors, artifact errors, and participant status. Long task, result, and error
+  text wraps and scrolls inside its detail area rather than expanding the
+  command center indefinitely.
+- Detail APIs return only records visible to the selected configured agent.
+  A record for another agent returns `403`, an unknown record returns `404`,
+  and neither response includes private task, goal, result, or error content.
+- Live Logs `Selected Agent` matches only explicit structured agent reference
+  fields. `Selected Record` further narrows or highlights lines that reference
+  the selected record ID or known peer IDs from the selected record. Plain text
+  substrings, partial IDs, tokens, and unrelated records must not match.
+
+Operators can infer which persisted delegation or meeting record is currently
+driving a card, the sanitized reason source used for the badge and list, and
+which local record, artifact reference, or retained log line to inspect next.
+Operators cannot infer that a failure was retried, repaired, externally
+published, or written to memory unless the visible persisted record or artifact
+status says so. The Organization page is a read-only diagnostic surface; it
+does not restart agents, retry work, write memory, publish artifacts, mutate
+Discord, or edit record JSON.
+
 ### 5. Missing Record Directory
 
 Stop the gateway if needed, move the local `delegations` or `meetings`

@@ -3,6 +3,15 @@ import assert from "node:assert/strict"
 
 import test from "node:test"
 
+import type { AgentOrganizationActivityRecord } from "@/api/agents"
+
+import {
+  DETAIL_TEXT_CLASS,
+  buildFailureDrilldownRecords,
+  formatDiagnosticFreshness,
+  formatDiagnosticReason,
+  formatDiagnosticReasonSource,
+} from "./formatting.ts"
 import {
   filterOrganizationLogLines,
   findOrganizationLogCorrelationFields,
@@ -299,4 +308,81 @@ test("correlates live logs with the selected activity record and known peers", (
     ],
   )
   assert.deepEqual(filterOrganizationLogLines(logs, "all", target), logs)
+})
+
+test("formats old diagnostic records with safe fallback labels", () => {
+  const translate = ((key: string, fallback?: string) =>
+    fallback ?? key) as never
+  const legacyRecord: AgentOrganizationActivityRecord = {
+    type: "delegation",
+    record_id: "delegation-legacy",
+    status: "failed",
+    role: "target",
+  }
+
+  assert.equal(
+    formatDiagnosticReason(legacyRecord, translate),
+    "No diagnostic reason available",
+  )
+  assert.equal(
+    formatDiagnosticReasonSource(legacyRecord, translate),
+    "Unknown source",
+  )
+  assert.equal(
+    formatDiagnosticFreshness(legacyRecord, false, translate),
+    "Stale",
+  )
+})
+
+test("prefers recent failure diagnostics and distinguishes historical records", () => {
+  const current: AgentOrganizationActivityRecord = {
+    type: "delegation",
+    record_id: "delegation-current",
+    status: "running",
+    role: "target",
+    current: true,
+  }
+  const lastFailure: AgentOrganizationActivityRecord = {
+    type: "meeting",
+    record_id: "meeting-failed",
+    status: "failed",
+    role: "participant",
+    stale: true,
+    reason: "Participant worker failed",
+    reason_source: "participant_turn",
+  }
+  const recentFailures: AgentOrganizationActivityRecord[] = [
+    lastFailure,
+    {
+      type: "delegation",
+      record_id: "delegation-failed",
+      status: "failed",
+      role: "target",
+      stale: true,
+      reason: "provider timed out",
+      reason_source: "record_error",
+    },
+  ]
+
+  assert.deepEqual(
+    buildFailureDrilldownRecords(current, lastFailure, recentFailures).map(
+      (record) =>
+        `${record.type}:${record.record_id}:${record.reason_source}:${record.stale}`,
+    ),
+    [
+      "meeting:meeting-failed:participant_turn:true",
+      "delegation:delegation-failed:record_error:true",
+    ],
+  )
+})
+
+test("detail text styling bounds large diagnostic summaries", () => {
+  for (const className of [
+    "max-h-32",
+    "overflow-y-auto",
+    "break-words",
+    "whitespace-pre-wrap",
+  ]) {
+    assert.match(DETAIL_TEXT_CLASS, new RegExp(`\\b${className}\\b`))
+  }
 })

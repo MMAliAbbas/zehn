@@ -938,6 +938,124 @@ func TestHandleGetAgentActivityDetail_RejectsHiddenAndUnknownRecords(t *testing.
 	}
 }
 
+func TestHandleAgentOrganization_DiagnosticsFlowThroughSummaryListAndDetail(t *testing.T) {
+	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
+		cfg.Agents.List = []config.AgentConfig{
+			{ID: "lead", Name: "Lead"},
+			{ID: "worker", Name: "Worker"},
+			{ID: "chair", Name: "Chair"},
+		}
+	})
+	cfg := loadOrganizationAPIConfig(t, configPath)
+
+	delegations := agent.NewDelegationRecordStore(filepath.Join(cfg.WorkspacePath(), "delegations"), nil)
+	delegation := writeDelegationRecord(t, delegations, agent.AgentDelegationRequest{
+		ParentAgentID: "lead",
+		TargetAgentID: "worker",
+		Task:          "delegation task token=delegation-secret " + strings.Repeat("delegation-body ", 80),
+		ArtifactRefs:  []string{"github:issue/654"},
+	})
+	if err := delegations.Failed(context.Background(), delegation.DelegationID, errors.New("delegation provider token=delegation-provider-secret failed "+strings.Repeat("delegation-error ", 40))); err != nil {
+		t.Fatalf("Failed(delegation) error = %v", err)
+	}
+	delegation.Status = agent.AgentDelegationStatusFailed
+	delegation.Error = &agent.AgentDelegationRecordError{
+		Message: "delegation provider token=delegation-provider-secret failed " + strings.Repeat("delegation-error ", 40),
+	}
+	setDelegationCreatedAt(t, cfg, &delegation, time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC))
+
+	meetings := agent.NewMeetingRecordStore(filepath.Join(cfg.WorkspacePath(), "meetings"), nil)
+	meeting := writeMeetingRecord(t, meetings, agent.AgentMeetingRequest{
+		Title:               "Release review",
+		SponsorAgentID:      "lead",
+		ChairAgentID:        "chair",
+		ParticipantAgentIDs: []string{"worker"},
+		Goal:                "meeting goal token=meeting-secret " + strings.Repeat("meeting-body ", 80),
+		ArtifactRefs:        []string{"github:discussion/321"},
+	})
+	if err := meetings.AddParticipantTurn(context.Background(), meeting.MeetingID, agent.AgentMeetingTurn{
+		AgentID:  "worker",
+		Status:   "failed",
+		Response: "participant response token=participant-secret " + strings.Repeat("participant-body ", 60),
+	}); err != nil {
+		t.Fatalf("AddParticipantTurn() error = %v", err)
+	}
+	meeting.Status = agent.AgentMeetingStatusFailed
+	meeting.ParticipantTurns = []agent.AgentMeetingTurn{{
+		AgentID:  "worker",
+		Status:   "failed",
+		Response: "participant response token=participant-secret " + strings.Repeat("participant-body ", 60),
+	}}
+	setMeetingCreatedAt(t, cfg, &meeting, time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC))
+
+	snapshotRec := requestAgentOrganization(t, configPath)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, want %d, body=%s", snapshotRec.Code, http.StatusOK, snapshotRec.Body.String())
+	}
+	snapshotBody := snapshotRec.Body.String()
+	for _, private := range []string{"delegation-secret", "delegation-provider-secret", "meeting-secret", "participant-secret", strings.Repeat("delegation-body ", 20), strings.Repeat("meeting-body ", 20)} {
+		if strings.Contains(snapshotBody, private) {
+			t.Fatalf("snapshot leaked private content %q: %s", private, snapshotBody)
+		}
+	}
+	var snapshot agentOrganizationSnapshot
+	decodeJSONResponse(t, snapshotRec, &snapshot)
+	if got, want := snapshot.Activity.FailureCount, 2; got != want {
+		t.Fatalf("failure count = %d, want %d", got, want)
+	}
+	worker := snapshot.Agents["worker"]
+	if worker.Status != agentOrganizationStatusFailed {
+		t.Fatalf("worker status = %q, want %q", worker.Status, agentOrganizationStatusFailed)
+	}
+	if worker.Activity.Current == nil || worker.Activity.Current.RecordID != meeting.MeetingID || worker.Activity.Current.ReasonSource != "participant_turn" {
+		t.Fatalf("worker current = %+v, want newest failed meeting participant diagnostic", worker.Activity.Current)
+	}
+	if worker.Activity.LastFailure == nil || worker.Activity.LastFailure.RecordID != meeting.MeetingID {
+		t.Fatalf("worker last failure = %+v, want meeting failure", worker.Activity.LastFailure)
+	}
+
+	listRec := requestAgentActivity(t, configPath, "/api/agents/worker/failures")
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	for _, private := range []string{"delegation-secret", "meeting-secret", "participant-secret"} {
+		if strings.Contains(listRec.Body.String(), private) {
+			t.Fatalf("failure list leaked private content %q: %s", private, listRec.Body.String())
+		}
+	}
+	var list agentActivityListResponse[agentOrganizationActivityRecord]
+	decodeJSONResponse(t, listRec, &list)
+	records := recordsByID(list.Records)
+	assertDiagnostic(t, records[delegation.DelegationID], compactDiagnosticText("delegation provider token=delegation-provider-secret failed "+strings.Repeat("delegation-error ", 40)), "record_error", true)
+	assertDiagnostic(t, records[meeting.MeetingID], "Participant worker failed", "participant_turn", true)
+
+	delegationDetailRec := requestAgentActivity(t, configPath, "/api/agents/worker/activity/delegation/"+delegation.DelegationID)
+	if delegationDetailRec.Code != http.StatusOK {
+		t.Fatalf("delegation detail status = %d, want %d, body=%s", delegationDetailRec.Code, http.StatusOK, delegationDetailRec.Body.String())
+	}
+	var delegationDetail agentOrganizationActivityDetail
+	decodeJSONResponse(t, delegationDetailRec, &delegationDetail)
+	if delegationDetail.RecordID != delegation.DelegationID || delegationDetail.Role != "target" || delegationDetail.PeerAgentID != "lead" {
+		t.Fatalf("delegation detail identity = %+v", delegationDetail)
+	}
+	if delegationDetail.RequestSummary == "" || len(delegationDetail.RequestSummary) > 140 || delegationDetail.ResultSummary == "" || len(delegationDetail.ResultSummary) > 140 {
+		t.Fatalf("delegation detail summaries are not bounded: request=%q result=%q", delegationDetail.RequestSummary, delegationDetail.ResultSummary)
+	}
+
+	meetingDetailRec := requestAgentActivity(t, configPath, "/api/agents/worker/activity/meeting/"+meeting.MeetingID)
+	if meetingDetailRec.Code != http.StatusOK {
+		t.Fatalf("meeting detail status = %d, want %d, body=%s", meetingDetailRec.Code, http.StatusOK, meetingDetailRec.Body.String())
+	}
+	var meetingDetail agentOrganizationActivityDetail
+	decodeJSONResponse(t, meetingDetailRec, &meetingDetail)
+	if meetingDetail.RecordID != meeting.MeetingID || meetingDetail.Role != "participant" || meetingDetail.PeerAgentID != "chair" {
+		t.Fatalf("meeting detail identity = %+v", meetingDetail)
+	}
+	if meetingDetail.ContextSummary == "" || len(meetingDetail.ContextSummary) > 140 || meetingDetail.ResultSummary == "" || len(meetingDetail.ResultSummary) > 140 {
+		t.Fatalf("meeting detail summaries are not bounded: context=%q result=%q", meetingDetail.ContextSummary, meetingDetail.ResultSummary)
+	}
+}
+
 func TestHandleAgentOrganization_NewerFailureRemainsCurrentWithoutNewerActiveRecord(t *testing.T) {
 	configPath := writeOrganizationAPIConfig(t, func(cfg *config.Config) {
 		cfg.Agents.List = []config.AgentConfig{

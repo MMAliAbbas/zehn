@@ -92,6 +92,9 @@ func NewAgentLoop(
 	// Register shared tools to all agents (now that al is created)
 	registerSharedTools(al, cfg, msgBus, registry, provider)
 
+	// Zehn-side: wire the GitHub artifact writer (no-op if gh is not on PATH)
+	wireZehnGitHubArtifactWriter(al, cfg)
+
 	return al
 }
 

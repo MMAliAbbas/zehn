@@ -13,6 +13,13 @@ type GitHubIssueRequest struct {
 	Title      string
 	Body       string
 	Labels     []string
+	// Repo is an optional target repository in "owner/name" or bare "name"
+	// form. When set, the writer routes the issue to this repo verbatim
+	// (caller wins). When empty, the Zehn writer's resolver inspects the
+	// title, body, and labels to pick a target repo from the live
+	// /Users/aliai/logicigniter/ inventory, falling back to a default.
+	// Field is optional so existing callers compile unchanged.
+	Repo string
 }
 
 type GitHubIssueArtifact struct {

@@ -17,6 +17,10 @@ func TestZehnGitHubArtifactWriter_CreateIssue_HappyPath(t *testing.T) {
 	var capturedName string
 	var capturedArgs []string
 	w := newZehnGitHubArtifactWriter("logicigniter/test", time.Second)
+	// Use an empty LI root so the resolver's discovery returns no known
+	// repos and falls back to the default repo. Keeps this test
+	// hermetic across machines.
+	w.resolver = newZehnGitHubRepoResolver(t.TempDir(), "logicigniter/test")
 	w.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		capturedName = name
 		capturedArgs = append([]string(nil), args...)
@@ -153,6 +157,66 @@ func TestZehnGitHubArtifactWriter_CreateComment_RejectsMissingTarget(t *testing.
 	if err == nil {
 		t.Fatal("expected error when no issue target is provided")
 	}
+}
+
+func TestZehnGitHubArtifactWriter_CreateIssue_RoutesToServiceRepoFromTitle(t *testing.T) {
+	// End-to-end check that resolver-driven repo routing reaches the gh
+	// command line for an issue whose title names a real LI service.
+	var capturedArgs []string
+	liRoot := setupFakeLIRoot(t, []string{"svc-contentaudit-grpc", "supervision"}, nil)
+
+	w := newZehnGitHubArtifactWriter("logicigniter/supervision", time.Second)
+	w.resolver = newZehnGitHubRepoResolver(liRoot, "logicigniter/supervision")
+	w.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		capturedArgs = append([]string(nil), args...)
+		return []byte("https://github.com/logicigniter/svc-contentaudit-grpc/issues/7\n"), nil
+	}
+
+	if _, err := w.CreateIssue(context.Background(), integrationtools.GitHubIssueRequest{
+		Title: "Stage 1 -> 2: complete svc-contentaudit-grpc proto",
+		Body:  "Per CTO ladder sweep recommendation.",
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Args should carry --repo logicigniter/svc-contentaudit-grpc, NOT the
+	// default supervision repo.
+	wantRepoArg := "logicigniter/svc-contentaudit-grpc"
+	foundRepoArg := false
+	for i, a := range capturedArgs {
+		if a == "--repo" && i+1 < len(capturedArgs) && capturedArgs[i+1] == wantRepoArg {
+			foundRepoArg = true
+			break
+		}
+	}
+	if !foundRepoArg {
+		t.Errorf("expected --repo %s in args, got %v", wantRepoArg, capturedArgs)
+	}
+}
+
+func TestZehnGitHubArtifactWriter_CreateIssue_ExplicitRepoOverridesResolver(t *testing.T) {
+	var capturedArgs []string
+	liRoot := setupFakeLIRoot(t, []string{"svc-contentaudit-grpc"}, nil)
+	w := newZehnGitHubArtifactWriter("logicigniter/supervision", time.Second)
+	w.resolver = newZehnGitHubRepoResolver(liRoot, "logicigniter/supervision")
+	w.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		capturedArgs = append([]string(nil), args...)
+		return []byte("https://github.com/logicigniter/svc-billing/issues/1\n"), nil
+	}
+	if _, err := w.CreateIssue(context.Background(), integrationtools.GitHubIssueRequest{
+		Title: "fix svc-contentaudit-grpc",
+		Repo:  "logicigniter/svc-billing", // caller wins
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for i, a := range capturedArgs {
+		if a == "--repo" && i+1 < len(capturedArgs) {
+			if capturedArgs[i+1] != "logicigniter/svc-billing" {
+				t.Errorf("expected explicit repo to win, got %s", capturedArgs[i+1])
+			}
+			return
+		}
+	}
+	t.Errorf("--repo flag missing from %v", capturedArgs)
 }
 
 func TestZehnGitHubArtifactWriter_DefaultsApplied(t *testing.T) {

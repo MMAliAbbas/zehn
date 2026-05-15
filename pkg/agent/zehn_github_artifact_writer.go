@@ -30,6 +30,7 @@ const (
 type zehnGitHubArtifactWriter struct {
 	defaultRepo string
 	timeout     time.Duration
+	resolver    *zehnGitHubRepoResolver
 
 	// execCmd is injectable so unit tests can substitute a fake without
 	// touching os/exec. Production callers leave this as the default,
@@ -47,6 +48,7 @@ func newZehnGitHubArtifactWriter(defaultRepo string, timeout time.Duration) *zeh
 	return &zehnGitHubArtifactWriter{
 		defaultRepo: defaultRepo,
 		timeout:     timeout,
+		resolver:    newZehnGitHubRepoResolver(defaultLogicIgniterRoot, defaultRepo),
 		execCmd: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return exec.CommandContext(ctx, name, args...).Output()
 		},
@@ -64,7 +66,12 @@ func (w *zehnGitHubArtifactWriter) CreateIssue(ctx context.Context, req integrat
 		return integrationtools.GitHubIssueArtifact{}, errors.New("github issue title is empty")
 	}
 
-	args := []string{"issue", "create", "--repo", w.defaultRepo, "--title", title, "--body", req.Body}
+	repo := w.resolver.resolveRepo(req)
+	if repo == "" {
+		repo = w.defaultRepo
+	}
+
+	args := []string{"issue", "create", "--repo", repo, "--title", title, "--body", req.Body}
 	for _, label := range req.Labels {
 		label = strings.TrimSpace(label)
 		if label == "" {

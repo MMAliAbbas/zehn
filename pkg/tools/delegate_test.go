@@ -15,7 +15,7 @@ type recordingDelegateSpawner struct {
 	calls  int
 }
 
-func (s *recordingDelegateSpawner) SpawnSubTurn(ctx context.Context, cfg SubTurnConfig) (*ToolResult, error) {
+func (s *recordingDelegateSpawner) SpawnSubTurn(_ context.Context, cfg SubTurnConfig) (*ToolResult, error) {
 	s.calls++
 	s.cfg = cfg
 	if s.err != nil {
@@ -27,12 +27,50 @@ func (s *recordingDelegateSpawner) SpawnSubTurn(ctx context.Context, cfg SubTurn
 	return NewToolResult("target response"), nil
 }
 
-func TestDelegateTool_Parameters(t *testing.T) {
-	tool := NewDelegateTool()
+type recordingDelegationRunner struct {
+	runResult   DelegateExecutionResult
+	runErr      error
+	runReq      DelegateExecutionRequest
+	runCalls    int
+	startResult DelegateExecutionResult
+	startErr    error
+	startReq    DelegateExecutionRequest
+	startCalls  int
+}
 
+func (r *recordingDelegationRunner) RunDelegation(_ context.Context, req DelegateExecutionRequest) (DelegateExecutionResult, error) {
+	r.runCalls++
+	r.runReq = req
+	if r.runErr != nil {
+		return DelegateExecutionResult{}, r.runErr
+	}
+	if r.runResult.DelegationID != "" {
+		return r.runResult, nil
+	}
+	return DelegateExecutionResult{DelegationID: "delegation-sync", TargetAgentID: req.TargetAgentID, Content: "sync response"}, nil
+}
+
+func (r *recordingDelegationRunner) StartDelegation(_ context.Context, req DelegateExecutionRequest) (DelegateExecutionResult, error) {
+	r.startCalls++
+	r.startReq = req
+	if r.startErr != nil {
+		return DelegateExecutionResult{}, r.startErr
+	}
+	if r.startResult.DelegationID != "" {
+		return r.startResult, nil
+	}
+	return DelegateExecutionResult{DelegationID: "delegation-123", TargetAgentID: req.TargetAgentID}, nil
+}
+
+func TestDelegateTool_Name(t *testing.T) {
+	tool := NewDelegateTool()
 	if tool.Name() != "delegate_to_agent" {
 		t.Fatalf("Name() = %q, want delegate_to_agent", tool.Name())
 	}
+}
+
+func TestDelegateTool_Parameters(t *testing.T) {
+	tool := NewDelegateTool()
 
 	params := tool.Parameters()
 	props, ok := params["properties"].(map[string]any)
@@ -53,29 +91,6 @@ func TestDelegateTool_Parameters(t *testing.T) {
 	}
 }
 
-type recordingDelegationRunner struct {
-	startResult DelegateExecutionResult
-	startErr    error
-	startReq    DelegateExecutionRequest
-	startCalls  int
-}
-
-func (r *recordingDelegationRunner) RunDelegation(ctx context.Context, req DelegateExecutionRequest) (DelegateExecutionResult, error) {
-	return DelegateExecutionResult{}, errors.New("sync runner should not be called")
-}
-
-func (r *recordingDelegationRunner) StartDelegation(ctx context.Context, req DelegateExecutionRequest) (DelegateExecutionResult, error) {
-	r.startCalls++
-	r.startReq = req
-	if r.startErr != nil {
-		return DelegateExecutionResult{}, r.startErr
-	}
-	if r.startResult.DelegationID != "" {
-		return r.startResult, nil
-	}
-	return DelegateExecutionResult{DelegationID: "delegation-123", TargetAgentID: req.TargetAgentID}, nil
-}
-
 func TestDelegateTool_Execute_AsyncReturnsDelegationIDImmediately(t *testing.T) {
 	runner := &recordingDelegationRunner{}
 	tool := NewDelegateTool()
@@ -85,7 +100,7 @@ func TestDelegateTool_Execute_AsyncReturnsDelegationIDImmediately(t *testing.T) 
 
 	start := time.Now()
 	result := tool.Execute(context.Background(), map[string]any{
-		"agent_id":   "engineering",
+		"agent_id":   "Engineering",
 		"task":       "Inspect the repository and report risks.",
 		"mode":       "async",
 		"thread_key": "repo-risk",
@@ -117,7 +132,35 @@ func TestDelegateTool_Execute_AsyncReturnsDelegationIDImmediately(t *testing.T) 
 	}
 }
 
-func TestDelegateTool_Execute_SyncSuccess(t *testing.T) {
+func TestDelegateTool_Execute_SyncRunnerSuccess(t *testing.T) {
+	runner := &recordingDelegationRunner{}
+	tool := NewDelegateTool()
+	tool.SetDelegationRunner(runner)
+	tool.SetTargetExistsChecker(func(targetAgentID string) bool { return targetAgentID == "cto" })
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"agent_id": "CTO",
+		"task":     "Review risk.",
+	})
+
+	if result.IsError {
+		t.Fatalf("Execute() returned error: %s", result.ForLLM)
+	}
+	if result.Async {
+		t.Fatal("sync delegation should not be async")
+	}
+	if runner.runCalls != 1 {
+		t.Fatalf("RunDelegation calls = %d, want 1", runner.runCalls)
+	}
+	if runner.runReq.TargetAgentID != "cto" {
+		t.Fatalf("TargetAgentID = %q, want cto", runner.runReq.TargetAgentID)
+	}
+	if !strings.Contains(result.ForLLM, "delegation-sync") {
+		t.Fatalf("ForLLM = %q, want delegation ID", result.ForLLM)
+	}
+}
+
+func TestDelegateTool_Execute_SubturnFallbackSuccess(t *testing.T) {
 	spawner := &recordingDelegateSpawner{result: UserResult("risk looks acceptable")}
 	tool := NewDelegateTool()
 	tool.SetSpawner(spawner)
@@ -125,7 +168,7 @@ func TestDelegateTool_Execute_SyncSuccess(t *testing.T) {
 	tool.SetTargetExistsChecker(func(targetAgentID string) bool { return targetAgentID == "ciso" })
 
 	result := tool.Execute(context.Background(), map[string]any{
-		"agent_id":      "ciso",
+		"agent_id":      "CISO",
 		"task":          "Review launch risk.",
 		"thread_key":    "launch-risk",
 		"priority":      "high",
@@ -136,17 +179,14 @@ func TestDelegateTool_Execute_SyncSuccess(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("Execute() returned error: %s", result.ForLLM)
 	}
-	if result.Async {
-		t.Fatal("delegate_to_agent should execute synchronously")
-	}
 	if got := result.ForUser; got != "risk looks acceptable" {
 		t.Fatalf("ForUser = %q, want target response", got)
 	}
-	if !strings.Contains(result.ForLLM, "Delegation to ciso completed") {
-		t.Fatalf("ForLLM = %q, want delegation summary", result.ForLLM)
-	}
 	if spawner.calls != 1 {
 		t.Fatalf("spawner calls = %d, want 1", spawner.calls)
+	}
+	if spawner.cfg.TargetAgentID != "ciso" {
+		t.Fatalf("TargetAgentID = %q, want ciso", spawner.cfg.TargetAgentID)
 	}
 	if spawner.cfg.Async {
 		t.Fatal("SubTurnConfig.Async = true, want false")
@@ -178,6 +218,11 @@ func TestDelegateTool_Execute_ValidationErrors(t *testing.T) {
 			name: "empty task",
 			args: map[string]any{"agent_id": "ciso", "task": " \n\t"},
 			want: "task is required",
+		},
+		{
+			name: "invalid mode",
+			args: map[string]any{"agent_id": "ciso", "task": "review", "mode": "later"},
+			want: "mode must be either sync or async",
 		},
 	}
 
@@ -255,4 +300,48 @@ func TestDelegateTool_Execute_ExecutionFailure(t *testing.T) {
 	if result.Err == nil {
 		t.Fatal("Err should be set")
 	}
+}
+
+func TestDelegateTool_Execute_SelfDelegation(t *testing.T) {
+	tool := NewDelegateTool()
+	tool.SetSpawner(&recordingDelegateSpawner{})
+	tool.SetSelfAgentID("alpha")
+
+	for _, agentID := range []string{"alpha", "ALPHA", " Alpha "} {
+		t.Run(agentID, func(t *testing.T) {
+			result := tool.Execute(context.Background(), map[string]any{
+				"agent_id": agentID,
+				"task":     "test",
+			})
+			if !result.IsError {
+				t.Fatal("expected error for self-delegation")
+			}
+			if !strings.Contains(result.ForLLM, "cannot delegate to self") {
+				t.Fatalf("ForLLM = %q", result.ForLLM)
+			}
+		})
+	}
+}
+
+func TestDelegateTool_Execute_NilResult(t *testing.T) {
+	tool := NewDelegateTool()
+	tool.SetSpawner(&nilResultSpawner{})
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"agent_id": "researcher",
+		"task":     "test",
+	})
+
+	if !result.IsError {
+		t.Fatal("expected error for nil result")
+	}
+	if !strings.Contains(result.ForLLM, "nil result") {
+		t.Fatalf("ForLLM = %q", result.ForLLM)
+	}
+}
+
+type nilResultSpawner struct{}
+
+func (m *nilResultSpawner) SpawnSubTurn(_ context.Context, _ SubTurnConfig) (*ToolResult, error) {
+	return nil, nil
 }

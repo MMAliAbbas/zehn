@@ -1,9 +1,7 @@
 package agent
 
 import (
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -14,15 +12,9 @@ import (
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
-// AgentDescriptor is the compact discovery model exposed to peer agents.
-type AgentDescriptor struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
 // AgentRegistry manages multiple agent instances and routes messages to them.
 type AgentRegistry struct {
+	cfg      *config.Config
 	agents   map[string]*AgentInstance
 	resolver *routing.RouteResolver
 	mu       sync.RWMutex
@@ -34,6 +26,7 @@ func NewAgentRegistry(
 	provider providers.LLMProvider,
 ) *AgentRegistry {
 	registry := &AgentRegistry{
+		cfg:      cfg,
 		agents:   make(map[string]*AgentInstance),
 		resolver: routing.NewRouteResolver(cfg),
 	}
@@ -63,7 +56,11 @@ func NewAgentRegistry(
 		}
 	}
 
-	registry.installAgentDiscoveryPrompts()
+	for _, instance := range registry.agents {
+		if instance.ContextBuilder != nil {
+			instance.ContextBuilder.WithAgentDiscovery(instance.ID, registry.ListSpawnableAgents)
+		}
+	}
 
 	return registry
 }
@@ -95,98 +92,34 @@ func (r *AgentRegistry) ListAgentIDs() []string {
 }
 
 // ListAgentDescriptors returns compact descriptors for all registered agents.
+// It is kept as a compatibility wrapper for Zehn-side callers; upstream's
+// structured discovery implementation lives in discovery.go.
 func (r *AgentRegistry) ListAgentDescriptors() []AgentDescriptor {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	descriptors := make([]AgentDescriptor, 0, len(r.agents))
-	for _, agent := range r.agents {
-		descriptors = append(descriptors, agentDescriptor(agent))
-	}
-	slices.SortFunc(descriptors, func(a, b AgentDescriptor) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-	return descriptors
+	return r.ListAgents("")
 }
 
-// GetAgentDescriptor returns the discovery descriptor for a normalized agent ID.
-func (r *AgentRegistry) GetAgentDescriptor(agentID string) (AgentDescriptor, bool) {
+func (r *AgentRegistry) allowedMCPServers() map[string]struct{} {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	id := routing.NormalizeAgentID(agentID)
-	agent, ok := r.agents[id]
-	if !ok {
-		return AgentDescriptor{}, false
-	}
-	return agentDescriptor(agent), true
-}
 
-func (r *AgentRegistry) installAgentDiscoveryPrompts() {
-	descriptors := r.ListAgentDescriptors()
-	if len(descriptors) <= 1 {
-		return
+	if len(r.agents) == 0 {
+		return nil
 	}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	union := make(map[string]struct{})
 	for _, agent := range r.agents {
-		if agent == nil || agent.ContextBuilder == nil {
+		if agent == nil {
 			continue
 		}
-		if err := agent.ContextBuilder.RegisterPromptContributor(agentDiscoveryPromptContributor{
-			selfID:      agent.ID,
-			descriptors: descriptors,
-		}); err != nil {
-			logger.WarnCF("agent", "Failed to register agent discovery prompt contributor", map[string]any{
-				"agent_id": agent.ID,
-				"error":    err.Error(),
-			})
+		if agent.MCPServerAllowlist == nil {
+			return nil
+		}
+		for serverName := range agent.MCPServerAllowlist {
+			union[serverName] = struct{}{}
 		}
 	}
-}
 
-func agentDescriptor(agent *AgentInstance) AgentDescriptor {
-	if agent == nil {
-		return AgentDescriptor{}
-	}
-
-	name := strings.TrimSpace(agent.Name)
-	description := strings.TrimSpace("Workspace: " + filepath.Base(agent.Workspace))
-	if agent.ContextBuilder != nil {
-		definition := agent.ContextBuilder.LoadAgentDefinition()
-		if definition.Agent != nil {
-			frontmatter := definition.Agent.Frontmatter
-			if strings.TrimSpace(frontmatter.Name) != "" {
-				name = strings.TrimSpace(frontmatter.Name)
-			}
-			if strings.TrimSpace(frontmatter.Description) != "" {
-				description = strings.TrimSpace(frontmatter.Description)
-			}
-		}
-	}
-	if name == "" {
-		name = agent.ID
-	}
-	if description == "" || description == "Workspace: ." {
-		description = "Agent " + agent.ID
-	}
-
-	return AgentDescriptor{
-		ID:          agent.ID,
-		Name:        compactDescriptorText(name),
-		Description: compactDescriptorText(description),
-	}
-}
-
-func compactDescriptorText(value string) string {
-	const maxLen = 240
-
-	value = strings.Join(strings.Fields(value), " ")
-	runes := []rune(value)
-	if len(runes) <= maxLen {
-		return value
-	}
-	return strings.TrimSpace(string(runes[:maxLen]))
+	return union
 }
 
 // CanSpawnSubagent checks if parentAgentID is allowed to spawn targetAgentID.
@@ -195,10 +128,13 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 	if !ok {
 		return false
 	}
-	if parent.Subagents == nil || parent.Subagents.AllowAgents == nil {
+	return agentAllowsSubagent(parent, routing.NormalizeAgentID(targetAgentID))
+}
+
+func agentAllowsSubagent(parent *AgentInstance, targetNorm string) bool {
+	if parent == nil || parent.Subagents == nil || parent.Subagents.AllowAgents == nil {
 		return false
 	}
-	targetNorm := routing.NormalizeAgentID(targetAgentID)
 	for _, allowed := range parent.Subagents.AllowAgents {
 		if allowed == "*" {
 			return true
@@ -208,6 +144,14 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 		}
 	}
 	return false
+}
+
+func agentHasSpawnTool(agent *AgentInstance) bool {
+	if agent == nil || agent.Tools == nil {
+		return false
+	}
+	_, ok := agent.Tools.Get("spawn")
+	return ok
 }
 
 // ForEachTool calls fn for every tool registered under the given name
@@ -239,16 +183,13 @@ func (r *AgentRegistry) Close() {
 func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, agent := range r.agents {
-		if agent != nil && agent.Default {
+	if id := r.defaultAgentIDLocked(); id != "" {
+		if agent, ok := r.agents[id]; ok {
 			return agent
 		}
 	}
-	if agent, ok := r.agents["main"]; ok {
-		return agent
-	}
-	for _, agent := range r.agents {
-		return agent
+	for id := range r.agents {
+		return r.agents[id]
 	}
 	return nil
 }

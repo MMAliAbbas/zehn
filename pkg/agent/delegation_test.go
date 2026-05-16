@@ -13,6 +13,7 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
+	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/session"
 )
@@ -82,8 +83,14 @@ func TestRunAgentDelegation_UsesTargetAgentSessionScopeAndPrompts(t *testing.T) 
 		},
 	}
 	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
-	collector, cleanup := newEventCollector(t, al)
-	defer cleanup()
+	runtimeCh, closeRuntimeEvents := subscribeRuntimeEventsForTest(
+		t,
+		al,
+		16,
+		runtimeevents.KindAgentTurnStart,
+		runtimeevents.KindAgentTurnEnd,
+	)
+	defer closeRuntimeEvents()
 
 	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
 		ParentAgentID: "parent",
@@ -127,21 +134,16 @@ func TestRunAgentDelegation_UsesTargetAgentSessionScopeAndPrompts(t *testing.T) 
 		t.Fatalf("prompt used parent workspace content:\n%s", prompt)
 	}
 
-	collector.mu.Lock()
-	events := append([]Event(nil), collector.events...)
-	collector.mu.Unlock()
-	if len(events) == 0 {
-		t.Fatal("expected turn events")
-	}
+	turnStart := waitForRuntimeEvent(t, runtimeCh, time.Second, func(evt runtimeevents.Event) bool {
+		return evt.Kind == runtimeevents.KindAgentTurnStart
+	})
+	events := append([]runtimeevents.Event{turnStart}, collectRuntimeEventStream(runtimeCh)...)
 	for _, evt := range events {
-		if evt.Meta.AgentID != "target" {
-			t.Fatalf("event agent ID = %q, want target for event %+v", evt.Meta.AgentID, evt)
+		if evt.Scope.AgentID != "target" {
+			t.Fatalf("event agent ID = %q, want target for event %+v", evt.Scope.AgentID, evt)
 		}
-		if evt.Meta.SessionKey != result.SessionKey {
-			t.Fatalf("event session key = %q, want %q", evt.Meta.SessionKey, result.SessionKey)
-		}
-		if evt.Context == nil || evt.Context.Scope == nil || evt.Context.Scope.AgentID != "target" {
-			t.Fatalf("event context scope = %#v, want target scope", evt.Context)
+		if evt.Scope.SessionKey != result.SessionKey {
+			t.Fatalf("event session key = %q, want %q", evt.Scope.SessionKey, result.SessionKey)
 		}
 	}
 }

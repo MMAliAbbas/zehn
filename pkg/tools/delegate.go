@@ -4,14 +4,20 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/sipeed/picoclaw/pkg/routing"
 )
 
+// DelegateTool delegates work to a configured peer agent. Zehn keeps the
+// durable delegate_to_agent tool contract while adopting upstream's normalized
+// target-agent routing semantics.
 type DelegateTool struct {
 	spawner        SubTurnSpawner
 	defaultModel   string
 	maxTokens      int
 	temperature    float64
 	allowlistCheck func(targetAgentID string) bool
+	selfAgentID    string
 	targetExists   func(targetAgentID string) bool
 	targetModel    func(targetAgentID string) string
 	runner         DelegationRunner
@@ -35,6 +41,10 @@ func (t *DelegateTool) SetSpawner(spawner SubTurnSpawner) {
 
 func (t *DelegateTool) SetAllowlistChecker(check func(targetAgentID string) bool) {
 	t.allowlistCheck = check
+}
+
+func (t *DelegateTool) SetSelfAgentID(id string) {
+	t.selfAgentID = routing.NormalizeAgentID(id)
 }
 
 func (t *DelegateTool) SetTargetExistsChecker(check func(targetAgentID string) bool) {
@@ -99,11 +109,11 @@ func (t *DelegateTool) Parameters() map[string]any {
 }
 
 func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
-	agentID, ok := args["agent_id"].(string)
-	agentID = strings.TrimSpace(agentID)
-	if !ok || agentID == "" {
+	rawAgentID, ok := args["agent_id"].(string)
+	if !ok || strings.TrimSpace(rawAgentID) == "" {
 		return delegateError("missing_agent_id", "agent_id is required and must be a non-empty string")
 	}
+	agentID := routing.NormalizeAgentID(rawAgentID)
 
 	task, ok := args["task"].(string)
 	task = strings.TrimSpace(task)
@@ -111,6 +121,9 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 		return delegateError("missing_task", "task is required and must be a non-empty string")
 	}
 
+	if t.selfAgentID != "" && agentID == t.selfAgentID {
+		return delegateError("self_delegation", "cannot delegate to self")
+	}
 	if t.allowlistCheck != nil && !t.allowlistCheck(agentID) {
 		return delegateError("denied_target", fmt.Sprintf("not allowed to delegate to agent %q", agentID))
 	}
@@ -175,7 +188,7 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 		}
 	}
 	if t.spawner == nil {
-		return delegateError("execution_failed", "delegated execution failed: subturn spawner not configured")
+		return delegateError("execution_failed", "delegated execution failed: delegate tool not configured")
 	}
 
 	model := t.defaultModel
@@ -186,11 +199,12 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	}
 
 	result, err := t.spawner.SpawnSubTurn(ctx, SubTurnConfig{
-		Model:        model,
-		SystemPrompt: delegatePrompt(agentID, task, threadKey, priority, due, artifactRefs),
-		MaxTokens:    t.maxTokens,
-		Temperature:  t.temperature,
-		Async:        false,
+		TargetAgentID: agentID,
+		Model:         model,
+		SystemPrompt:  delegatePrompt(agentID, task, threadKey, priority, due, artifactRefs),
+		MaxTokens:     t.maxTokens,
+		Temperature:   t.temperature,
+		Async:         false,
 	})
 	if err != nil {
 		return delegateError("execution_failed", fmt.Sprintf("delegated execution failed: %v", err)).WithError(err)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
@@ -201,9 +202,9 @@ func TestContextBuilder_CollectsToolDiscoveryContributor(t *testing.T) {
 
 func TestAgentDiscoveryPromptContributorOmitsSingleAgentSetup(t *testing.T) {
 	contributor := agentDiscoveryPromptContributor{
-		selfID: "main",
-		descriptors: []AgentDescriptor{
-			{ID: "main", Name: "Main", Description: "Primary agent."},
+		agentID: "main",
+		discover: func(agentID string) []AgentDescriptor {
+			return nil
 		},
 	}
 
@@ -218,11 +219,12 @@ func TestAgentDiscoveryPromptContributorOmitsSingleAgentSetup(t *testing.T) {
 
 func TestAgentDiscoveryPromptContributorListsPeers(t *testing.T) {
 	contributor := agentDiscoveryPromptContributor{
-		selfID: "planner",
-		descriptors: []AgentDescriptor{
-			{ID: "research", Name: "Research", Description: "Finds source material."},
-			{ID: "planner", Name: "Planner", Description: "Plans the work."},
-			{ID: "review", Name: "Review", Description: "Reviews output."},
+		agentID: "planner",
+		discover: func(agentID string) []AgentDescriptor {
+			return []AgentDescriptor{
+				{ID: "research", Name: "Research", Description: "Finds source material."},
+				{ID: "review", Name: "Review", Description: "Reviews output."},
+			}
 		},
 	}
 
@@ -234,15 +236,23 @@ func TestAgentDiscoveryPromptContributorListsPeers(t *testing.T) {
 		t.Fatalf("ContributePrompt() len = %d, want 1: %+v", len(parts), parts)
 	}
 	content := parts[0].Content
-	if strings.Contains(content, "`planner`") {
+	if strings.Contains(content, `"id": "planner"`) {
 		t.Fatalf("discovery prompt should omit self, got %q", content)
 	}
-	researchLine := "- `research` (Research): Finds source material."
-	reviewLine := "- `review` (Review): Reviews output."
-	if !strings.Contains(content, researchLine) || !strings.Contains(content, reviewLine) {
-		t.Fatalf("discovery prompt missing peer lines, got %q", content)
+	for _, want := range []string{
+		"# Agent Discovery",
+		`"id": "research"`,
+		`"name": "Research"`,
+		`"description": "Finds source material."`,
+		`"id": "review"`,
+		`"name": "Review"`,
+		`"description": "Reviews output."`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("discovery prompt missing %q, got %q", want, content)
+		}
 	}
-	if strings.Index(content, researchLine) > strings.Index(content, reviewLine) {
+	if strings.Index(content, `"id": "research"`) > strings.Index(content, `"id": "review"`) {
 		t.Fatalf("discovery prompt order is not deterministic by id: %q", content)
 	}
 }
@@ -250,24 +260,33 @@ func TestAgentDiscoveryPromptContributorListsPeers(t *testing.T) {
 func TestNewAgentRegistryInjectsDiscoveryPromptForMultiAgentSetups(t *testing.T) {
 	t.Setenv("PICOCLAW_BUILTIN_SKILLS", t.TempDir())
 	cfg := testCfg([]config.AgentConfig{
-		{ID: "planner", Name: "Planner"},
+		{
+			ID:   "planner",
+			Name: "Planner",
+			Subagents: &config.SubagentsConfig{
+				AllowAgents: []string{"research"},
+			},
+		},
 		{ID: "research", Name: "Research"},
 	})
-	registry := NewAgentRegistry(cfg, &mockRegistryProvider{})
+	cfg.Tools.Spawn.Enabled = true
+	cfg.Tools.Subagent.Enabled = true
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockRegistryProvider{})
+	defer al.Close()
 
-	planner, ok := registry.GetAgent("planner")
+	planner, ok := al.GetRegistry().GetAgent("planner")
 	if !ok {
 		t.Fatal("expected planner agent")
 	}
 	messages := planner.ContextBuilder.BuildMessagesFromPrompt(PromptBuildRequest{CurrentMessage: "hello"})
 	system := messages[0]
-	if !strings.Contains(system.Content, "# Peer Agents") {
+	if !strings.Contains(system.Content, "# Agent Discovery") {
 		t.Fatalf("system prompt missing peer discovery section: %q", system.Content)
 	}
-	if !strings.Contains(system.Content, "`research` (Research)") {
+	if !strings.Contains(system.Content, `"id": "research"`) {
 		t.Fatalf("system prompt missing research peer: %q", system.Content)
 	}
-	if strings.Contains(system.Content, "`planner` (Planner)") {
+	if strings.Contains(system.Content, `"id": "planner"`) {
 		t.Fatalf("system prompt should omit self descriptor: %q", system.Content)
 	}
 }

@@ -457,6 +457,9 @@ func DefaultConfig() *Config {
 			ListDir: ToolConfig{
 				Enabled: true,
 			},
+			LoadImage: ToolConfig{
+				Enabled: true,
+			},
 			Message: ToolConfig{
 				Enabled: true,
 			},

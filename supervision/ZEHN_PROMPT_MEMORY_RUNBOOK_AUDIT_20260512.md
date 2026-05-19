@@ -49,7 +49,7 @@ Inventory size:
 
 - Active Markdown/agent identity inventory under `.picoclaw/workspace*`:
   246 files.
-- Current cron jobs in `.picoclaw/workspace/cron/jobs.json`: 11.
+- Current cron jobs in `.picoclaw/workspace/cron/jobs.json`: 6.
 - Current LogicIgniter agent workspaces with `AGENT.md`: 40.
 - Current old persistent app-agent workspaces: 0.
 - Current bundle-owner workspaces: 10.
@@ -62,50 +62,49 @@ of risk rather than rewritten line by line.
 
 ## Initial High-Risk Findings
 
-### F-001: Cron payload inventory does not match the previously described added jobs
+### F-001: Cron payload inventory changed after the earlier audit
 
 Evidence:
 
-- Current cron extraction from `.picoclaw/workspace/cron/jobs.json` listed 11
-  scheduled jobs:
-  - `logicigniter-ceo-operating-check`
-  - `personal-operating-check`
-  - `logicigniter-engineering-check`
-  - `logicigniter-github-control-plane-reconciler`
-  - six specialist work queues: architect, backend, frontend, UX, integration,
-    data/AI
-  - daily training
-- The extraction did not show the previously described DevOps, QA, Security,
-  and Docs specialist queue jobs.
+- Earlier cron extraction from `.picoclaw/workspace/cron/jobs.json` listed 11
+  scheduled jobs, including old operating-check and specialist queue jobs.
+- Current extraction lists 6 scheduled jobs:
+  - `li-weekly-plan`
+  - `li-daily-synthesis`
+  - `zehn-operations-monitor`
+  - `li-weekly-review`
+  - `li-ceo-daily-sync`
+  - `li-nonexec-weekly-pulse`
+- The old `logicigniter-ceo-operating-check` and
+  `logicigniter-engineering-check` prompts now live under
+  `.picoclaw/workspace/operating-prompts/archive/`.
 
 Impact:
 
-- Zehn may not autonomously run dedicated DevOps, QA, Security, and Docs queue
-  checks on schedule even though current work frequently waits on those roles.
-- If these jobs were expected to exist, the active file state contradicts the
-  operational expectation.
+- The earlier 11-job finding is no longer current evidence.
+- The active scheduler should be evaluated against the current 6-job operating
+  model, not against archived operating-check prompts.
 
 Required follow-up:
 
-- Re-check `jobs.json` directly before any restart/reload.
-- Decide whether DevOps/QA/Security/Docs specialist schedules should exist.
-- If yes, add them deliberately and validate the file before restart.
+- Keep archived prompt references out of current-runtime conclusions unless an
+  active cron job, current prompt, or dispatch rule still points to them.
+- Continue verifying current jobs with
+  `operations/verify-logicigniter-cron-routing.sh`.
 
 ### F-002: Several cron payloads say "Report HEARTBEAT_OK only when no claimable issue exists" but omit active PR review work
 
 Evidence:
 
 - Cron payloads for specialist queues focus on "unclaimed `zehn:ready`" issues.
-- Current scheduler/worker prompt files partially fix this:
-  `.picoclaw/workspace/operating-prompts/logicigniter-specialist-work-check.md`
+- Archived scheduler/worker prompt files partially fixed this:
+  `.picoclaw/workspace/operating-prompts/archive/logicigniter-specialist-work-check.md`
   and
-  `.picoclaw/workspace/operating-prompts/logicigniter-specialist-worker-check.md`
+  `.picoclaw/workspace/operating-prompts/archive/logicigniter-specialist-worker-check.md`
   both contain an active PR review queue requirement.
-- However, the persisted cron messages in
-  `.picoclaw/workspace/cron/jobs.json` still summarize specialist work as
-  "inspect GitHub for unclaimed `zehn:ready` ... work" and say
-  `HEARTBEAT_OK` is allowed when no claimable work or blocker exists, without
-  mentioning matching open PRs.
+- The current 6-job scheduler no longer has those specialist queue entries, so
+  this finding should be treated as historical unless a specialist queue is
+  reintroduced.
 - Recent GitHub evidence showed real active work in open PRs and
   `zehn:review-internal` / `zehn:in-progress`, including:
   - `logicigniter/scripts` PR #8
@@ -137,7 +136,7 @@ Required follow-up:
 
 Evidence:
 
-- `.picoclaw/workspace/operating-prompts/logicigniter-specialist-worker-check.md`
+- `.picoclaw/workspace/operating-prompts/archive/logicigniter-specialist-worker-check.md`
   instructs agents to run:
   `/Users/aliai/logicigniter/scripts/verification/verify-pr.sh --repo <repo> --issue <issue>`
 - Local check found no file at:
@@ -171,7 +170,8 @@ Evidence:
 
 - Recent delegation records include repeated CTO completions with:
   `I've reached max_tool_iterations without a final response...`
-- `.picoclaw/workspace/operating-prompts/logicigniter-engineering-check.md`
+- The archived prompt
+  `.picoclaw/workspace/operating-prompts/archive/logicigniter-engineering-check.md`
   asks CTO to inspect many surfaces: GitHub Projects/issues, PRs, failed checks,
   recent repo changes, business plans, integration readiness, quality gates,
   security/devops blockers, service makeover status, local repo state, and more.
@@ -223,16 +223,10 @@ Required follow-up:
 
 Evidence:
 
-- `LOGICIGNITER_PORTFOLIO_REGISTRY_V1.md` redefines the original 10 MCQ/user
-  bundle names into new "Ignite ..." market bundles.
-- Bundle agent IDs remain old suite slugs, while `AGENT.md`/`IDENTITY.md` files
-  say the configured ID may contain an older setup-phase suite slug. Examples:
-  - `li-bundle-saas-growth-and-retention-suite` now operates as
-    `Ignite Messaging`.
-  - `li-bundle-e-commerce-operations-suite` now operates as
-    `Ignite Workflow Webhooks`.
-  - `li-bundle-developer-and-devops-suite` now operates as
-    `Ignite Compliance Ops`.
+- Earlier `LOGICIGNITER_PORTFOLIO_REGISTRY_V1.md` content redefined the
+  original 10 MCQ/user bundle names into alternate market-package labels.
+- Bundle agent IDs remained old suite slugs while role files presented alternate
+  package labels. This has since been remediated to canonical suite names.
 - User-provided original bundle names included:
   - SaaS Growth & Retention Suite
   - E-commerce Operations Suite
@@ -426,33 +420,32 @@ Required follow-up:
   - stale blocker cleanup;
   - post-merge reconciliation handoff when applicable.
 
-### F-013: CEO and engineering prompts still require `verify-pr.sh` unconditionally in places
+### F-013: Archived CEO and engineering prompts still contain stricter `verify-pr.sh` wording
 
 Evidence:
 
-- `.picoclaw/workspace/operating-prompts/logicigniter-ceo-operating-check.md`
-  instructs the CEO flow to run:
+- `.picoclaw/workspace/operating-prompts/archive/logicigniter-ceo-operating-check.md`
+  instructs the archived CEO flow to run:
   `/Users/aliai/logicigniter/scripts/verification/verify-pr.sh --repo <repo> --issue <issue>`.
 - The same prompt says low-risk merges require "`verify-pr.sh` passed".
-- `.picoclaw/workspace/operating-prompts/logicigniter-engineering-check.md`
-  has the same standard flow and merge gate.
+- `.picoclaw/workspace/operating-prompts/archive/logicigniter-engineering-check.md`
+  has the same archived standard flow and merge gate.
 - Current cron messages say "run `verify-pr.sh` when available" or
   "verify-pr.sh or documented repo verification", which is more accurate than
   the deeper prompt text.
 
 Impact:
 
-- The shallow cron text and deeper prompt text disagree.
-- Agents may block on a missing wrapper even when a repo-specific fallback is
-  acceptable, or may think a fallback is allowed from cron while the prompt says
-  merge requires the missing wrapper.
+- If archived prompts are accidentally reactivated or copied into current
+  prompts, agents may block on a missing wrapper even when a repo-specific
+  fallback is acceptable.
 
 Required follow-up:
 
-- Make the policy consistent everywhere:
+- Keep the current active policy consistent:
   - preferred: `verify-pr.sh` when present on the active branch;
-  - fallback: documented repo-specific verification plus issue/PR evidence;
-  - P0: create/merge the standard wrapper so the fallback becomes unnecessary.
+  - fallback: documented repo-specific verification plus issue/PR evidence.
+- If archived prompts are restored, update them before activation.
 
 ### F-014: Setup planning still contains stale runtime snapshots and old counts
 
@@ -463,7 +456,7 @@ Evidence:
   and old agent-count milestones.
 - Current config has 40 LogicIgniter agent workspaces, 0 old
   `workspace-li-app-*` directories, and 10 bundle owner workspaces.
-- Current `jobs.json` contains 11 jobs and heartbeat is enabled.
+- Current `jobs.json` contains 6 jobs and heartbeat is enabled.
 
 Impact:
 
@@ -479,42 +472,42 @@ Required follow-up:
 - Create one short canonical current-state runtime summary that agents read
   before older setup notes.
 
-### F-015: Portfolio naming now conflicts across user-approved suites, Ignite bundles, and agent IDs
+### F-015: Portfolio naming conflict was found and remediated
 
 Evidence:
 
-- Current config names the 10 bundle agents with old suite IDs but new display
-  names:
-  - `li-bundle-saas-growth-and-retention-suite` -> `Ignite Messaging`
-  - `li-bundle-e-commerce-operations-suite` -> `Ignite Workflow Webhooks`
-  - `li-bundle-finance-and-revenue-intelligence-suite` -> `Ignite Commerce Ops`
-  - `li-bundle-legal-and-compliance-suite` -> `Ignite Revenue Ops`
-  - `li-bundle-developer-and-devops-suite` -> `Ignite Compliance Ops`
-  - `li-bundle-content-and-marketing-suite` -> `Ignite Contract & Vendor Ops`
-  - `li-bundle-hr-and-workforce-suite` -> `Ignite People & Learning Ops`
-  - `li-bundle-professional-services-suite` -> `Ignite Property Ops`
-  - `li-bundle-real-estate-and-property-suite` -> `Ignite Media Intelligence`
-  - `li-bundle-education-suite` -> `Ignite Security & Reliability`
+- Earlier config and role files mixed the original 10 suite names with alternate
+  market-package labels.
+- Current config now names all 10 bundle agents with the original user-approved
+  suite taxonomy:
+  - SaaS Growth & Retention Suite
+  - E-commerce Operations Suite
+  - Finance & Revenue Intelligence Suite
+  - Legal & Compliance Suite
+  - Developer & DevOps Suite
+  - Content & Marketing Suite
+  - HR & Workforce Suite
+  - Professional Services Suite
+  - Real Estate & Property Suite
+  - Education Suite
 - The original user-provided taxonomy was 10 named suites:
   SaaS Growth & Retention, E-commerce Operations, Finance & Revenue
   Intelligence, Legal & Compliance, Developer & DevOps, Content & Marketing,
   HR & Workforce, Professional Services, Real Estate & Property, and Education.
-- Bundle `USER.md` files now say "Ali wants Ignite ..." for the new names.
+- Bundle `AGENT.md`, `IDENTITY.md`, and `USER.md` files now use the canonical
+  suite names rather than the earlier alternate labels.
 
 Impact:
 
-- This is not just stale text; it is a live config and prompt identity issue.
-- A user asking about "Developer & DevOps Suite" may reach an agent whose
-  display identity is now "Ignite Compliance Ops".
-- Product planning, docs, Discord status, and org UI can become confusing or
-  wrong if the Ignite packaging was not explicitly approved as replacement
-  canon.
+- This was a live config/prompt identity issue before remediation.
+- Current impact is residual audit risk only: older documents may still mention
+  the alternate packaging labels and should not be treated as current canon.
 
 Required follow-up:
 
-- Resolve taxonomy with Ali before further portfolio automation.
-- Until resolved, mark Ignite names as "provisional packaging hypothesis" and
-  keep original 10 suite names as the canonical user-supplied taxonomy.
+- Keep the original 10 suite names as the canonical user-supplied taxonomy.
+- Reject future prompt/config changes that rename bundle owners unless Ali
+  explicitly approves a taxonomy change.
 
 ### F-016: Post-merge reconciliation script is useful but may not be executable by Zehn under current tool safety
 

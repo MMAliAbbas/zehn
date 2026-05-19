@@ -13,6 +13,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/commands"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/constants"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/utils"
@@ -176,6 +177,9 @@ func toolFeedbackArgsPreview(args map[string]any, maxLen int) string {
 
 func shouldPublishToolFeedback(cfg *config.Config, ts *turnState) bool {
 	if ts == nil || ts.channel == "" || ts.opts.SuppressToolFeedback {
+		return false
+	}
+	if constants.IsInternalChannel(ts.channel) {
 		return false
 	}
 	return cfg != nil && cfg.Agents.Defaults.IsToolFeedbackEnabled()

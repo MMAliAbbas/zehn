@@ -261,6 +261,7 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 		DefaultResponse:         defaultResponse,
 		EnableSummary:           false,
 		SendResponse:            false,
+		SuppressToolFeedback:    true,
 		SkipInitialSteeringPoll: true,
 	}
 

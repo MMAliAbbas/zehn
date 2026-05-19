@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sipeed/picoclaw/pkg/config"
+)
 
 func TestInferMediaType(t *testing.T) {
 	tests := []struct {
@@ -72,5 +76,39 @@ func TestInferMediaType(t *testing.T) {
 				t.Fatalf("inferMediaType(%q, %q) = %q, want %q", tt.filename, tt.contentType, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestShouldPublishToolFeedbackSkipsInternalChannels(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				ToolFeedback: config.ToolFeedbackConfig{Enabled: true},
+			},
+		},
+	}
+
+	for _, channel := range []string{"cli", "system", "subagent", "internal"} {
+		t.Run(channel, func(t *testing.T) {
+			ts := &turnState{channel: channel}
+			if shouldPublishToolFeedback(cfg, ts) {
+				t.Fatalf("shouldPublishToolFeedback(%q) = true, want false", channel)
+			}
+		})
+	}
+}
+
+func TestShouldPublishToolFeedbackAllowsExternalChannelsWhenEnabled(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				ToolFeedback: config.ToolFeedbackConfig{Enabled: true},
+			},
+		},
+	}
+
+	ts := &turnState{channel: "discord"}
+	if !shouldPublishToolFeedback(cfg, ts) {
+		t.Fatal("shouldPublishToolFeedback(discord) = false, want true")
 	}
 }

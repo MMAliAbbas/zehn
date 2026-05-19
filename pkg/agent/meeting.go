@@ -261,6 +261,7 @@ func (al *AgentLoop) runInternalAgentMeetingTurn(
 		DefaultResponse:         defaultResponse,
 		EnableSummary:           false,
 		SendResponse:            false,
+		SuppressToolFeedback:    true,
 		SkipInitialSteeringPoll: true,
 	}
 	ensureSessionMetadata(target.Sessions, sessionKey, &scope, []string{alias})

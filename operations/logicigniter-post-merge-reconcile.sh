@@ -61,7 +61,7 @@ done
 [ -n "$pr" ] || die "--pr is required"
 
 case "$repo" in
-  business|operations|supervision|scripts|integration_tests|keycloak|config|infra|proto|go-packages|svc-*)
+  business|operations|supervision|scripts|integration_tests|keycloak|config|infra|proto|go-packages|svc-*|apps-*-web|apps-*)
     ;;
   *)
     die "repo is not in the trusted LogicIgniter allowlist: $repo"
@@ -70,6 +70,11 @@ esac
 
 repo_dir="$ROOT/$repo"
 [ -d "$repo_dir/.git" ] || die "local repo is missing or not a git repo: $repo_dir"
+
+APP_RECONCILE_MAP="$ROOT/scripts/local-preview/app-reconcile-map.sh"
+[ -f "$APP_RECONCILE_MAP" ] || die "missing app reconcile mapping: $APP_RECONCILE_MAP"
+# shellcheck source=/dev/null
+source "$APP_RECONCILE_MAP"
 
 require_cmd git
 require_cmd gh
@@ -162,6 +167,40 @@ case "$repo" in
     run_root_script scripts/local-preview/start-all-grpc.sh all "$slug"
     run_root_script scripts/local-preview/verify-services-up.sh "$slug"
     health_summary="verify-services-up.sh $slug"
+    ;;
+  svc-logicigniter-web)
+    restart_kind="web"
+    run_root_script scripts/local-preview/start-web.sh
+    wait_http svc-logicigniter-web http://localhost:8080/
+    health_summary="http://localhost:8080/ (Cloudflare tunnel: logicigniter.com)"
+    ;;
+  svc-logicigniter-portal)
+    restart_kind="portal"
+    run_root_script scripts/local-preview/start-portal.sh
+    wait_http svc-logicigniter-portal http://localhost:8081/
+    health_summary="http://localhost:8081/ (Cloudflare tunnel: portal.logicigniter.com)"
+    ;;
+  apps-*-web)
+    restart_kind="app"
+    slug_full="${repo#apps-}"
+    slug="${slug_full%-web}"
+    # Port mapping lives in scripts/local-preview/app-reconcile-map.sh so new
+    # app classes are added in one explicit data map instead of copied cases.
+    port="$(li_app_preview_port "$slug")" || die "no port mapping for apps slug: $slug"
+    run_root_script scripts/local-preview/start-app.sh --slug "$slug" --port "$port"
+    wait_http "$repo" "http://localhost:$port/"
+    # Public route uses single-level path routing under ignite.logicigniter.com.
+    # Cloudflare Free Universal SSL does not cover *.ignite.logicigniter.com.
+    public_path="${slug#ignite-}"
+    health_summary="http://localhost:$port/ (Cloudflare tunnel: ignite.logicigniter.com/$public_path)"
+    ;;
+  apps-*)
+    if li_app_is_no_restart_repo "$repo"; then
+      restart_kind="no-runtime-restart"
+      health_summary="standalone/local-first app repo; synced only; no HTTP preview restart mapped"
+    else
+      die "no post-merge restart mapping for app repo: $repo"
+    fi
     ;;
   scripts|integration_tests|proto|go-packages|config|infra|business|operations|supervision|keycloak)
     restart_kind="no-runtime-restart"

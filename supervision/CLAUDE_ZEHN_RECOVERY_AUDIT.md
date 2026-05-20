@@ -208,7 +208,7 @@ findings, re-validated by spot-checking today.
 
 ## 6. Config Validity Review
 
-`/Users/aliai/zehn/.picoclaw/config.json` was validated against the PicoClaw
+`/Users/aliai/.picoclaw-zehn/config.json` was validated against the PicoClaw
 Go source (`pkg/config/config.go`, `pkg/config/migration.go`,
 `pkg/config/diagnostics.go`).
 

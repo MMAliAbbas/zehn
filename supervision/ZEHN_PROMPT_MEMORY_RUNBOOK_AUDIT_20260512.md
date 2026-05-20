@@ -576,7 +576,7 @@ Required follow-up:
 Evidence:
 
 - `.picoclaw/workspace/operating-prompts/zehn-operations-monitor.md` exists and
-  points to `/Users/aliai/zehn/.picoclaw/logs/gateway.log`.
+  points to `/Users/aliai/.picoclaw-zehn/logs/gateway.log`.
 - The log path exists and `gateway.log` is large and active.
 - `.picoclaw/workspace/cron/jobs.json` does not include a
   `zehn-operations-monitor` or equivalent bot-health scheduled job. The only

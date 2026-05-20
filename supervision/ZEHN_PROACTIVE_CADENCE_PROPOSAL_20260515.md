@@ -134,15 +134,15 @@ Inspection commands (read-only):
 ```bash
 # Cadence doc (v3) — diff against pre-v3 state in git history of /Users/aliai/zehn
 diff <(git show HEAD:.picoclaw/workspace/memory/LOGICIGNITER_OPERATING_CADENCE.md 2>/dev/null || echo "not in HEAD — gitignored") \
-     /Users/aliai/zehn/.picoclaw/workspace/memory/LOGICIGNITER_OPERATING_CADENCE.md
+     /Users/aliai/.picoclaw-zehn/workspace/memory/LOGICIGNITER_OPERATING_CADENCE.md
 
 # New operating prompts
-cat /Users/aliai/zehn/.picoclaw/workspace/operating-prompts/logicigniter-ceo-daily-sync.md
-cat /Users/aliai/zehn/.picoclaw/workspace/operating-prompts/logicigniter-nonexec-weekly-pulse.md
-cat /Users/aliai/zehn/.picoclaw/workspace/operating-prompts/logicigniter-release-ladder-assessment.md
+cat /Users/aliai/.picoclaw-zehn/workspace/operating-prompts/logicigniter-ceo-daily-sync.md
+cat /Users/aliai/.picoclaw-zehn/workspace/operating-prompts/logicigniter-nonexec-weekly-pulse.md
+cat /Users/aliai/.picoclaw-zehn/workspace/operating-prompts/logicigniter-release-ladder-assessment.md
 
 # jobs.json delta — confirms 4 enabled (v2 set) + 2 disabled (new v3)
-python3 -c "import json; d=json.load(open('/Users/aliai/zehn/.picoclaw/workspace/cron/jobs.json')); [print(f\"{'ON ' if j['enabled'] else 'off'}  {j['name']:30s} {j['schedule']['expr']}\") for j in d['jobs']]"
+python3 -c "import json; d=json.load(open('/Users/aliai/.picoclaw-zehn/workspace/cron/jobs.json')); [print(f\"{'ON ' if j['enabled'] else 'off'}  {j['name']:30s} {j['schedule']['expr']}\") for j in d['jobs']]"
 ```
 
 Activation is a two-line edit of `jobs.json` per the steps under

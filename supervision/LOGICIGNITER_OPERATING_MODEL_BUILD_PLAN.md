@@ -122,7 +122,7 @@ green check from the new workflow.
 ### Artifact 3 — Release Readiness Ladder (size: M, P0)
 
 **Path:**
-`/Users/aliai/zehn/.picoclaw/workspace/memory/LOGICIGNITER_RELEASE_READINESS_LADDER.md`
+`/Users/aliai/.picoclaw-zehn/workspace/memory/LOGICIGNITER_RELEASE_READINESS_LADDER.md`
 
 **Purpose:** Give CPO and CTO measurable progress per app. "All 51
 launch together" remains the constraint, but per-app state becomes
@@ -157,7 +157,7 @@ one named blocker or "ready for next stage" note.
 ### Artifact 4 — Work Selection Algorithm (size: S, P0)
 
 **Path:**
-`/Users/aliai/zehn/.picoclaw/workspace/memory/LOGICIGNITER_WORK_SELECTION.md`
+`/Users/aliai/.picoclaw-zehn/workspace/memory/LOGICIGNITER_WORK_SELECTION.md`
 
 **Purpose:** Replace "10 specialists each scan everything every hour"
 with a concrete, ranked selection rule. This is the missing algorithm
@@ -193,7 +193,7 @@ produce a consistent ranked list.
 ### Artifact 5 — Operating Cadence v2 (size: S, P0)
 
 **Path:**
-`/Users/aliai/zehn/.picoclaw/workspace/memory/LOGICIGNITER_OPERATING_CADENCE.md`
+`/Users/aliai/.picoclaw-zehn/workspace/memory/LOGICIGNITER_OPERATING_CADENCE.md`
 (replaces the current 248-line file, not appended to)
 
 **Purpose:** Replace polling-only with a real cadence.
@@ -227,8 +227,8 @@ archived to `memory/archive/`.
 ### Artifact 6 — COO Scoreboard (size: S, P1)
 
 **Path:** generated daily at
-`/Users/aliai/zehn/.picoclaw/workspace/memory/scoreboard/YYYYMMDD.md`
-plus a live `/Users/aliai/zehn/.picoclaw/workspace/memory/scoreboard/LATEST.md`
+`/Users/aliai/.picoclaw-zehn/workspace/memory/scoreboard/YYYYMMDD.md`
+plus a live `/Users/aliai/.picoclaw-zehn/workspace/memory/scoreboard/LATEST.md`
 
 **Purpose:** Make throughput visible. COO needs an instrument to
 manage.
@@ -252,7 +252,7 @@ referencing the file.
 
 ### Artifact 7 — New Cron Job Set (size: S, P0)
 
-**Path:** `/Users/aliai/zehn/.picoclaw/workspace/cron/jobs.json` (replace
+**Path:** `/Users/aliai/.picoclaw-zehn/workspace/cron/jobs.json` (replace
 the 17-job model in place; the current file is already in `.picoclaw/`
 backups via existing snapshot pattern).
 
@@ -288,7 +288,7 @@ contains exactly 4 enabled-FALSE jobs awaiting restart approval.
 ### Artifact 8 — Event-Driven Dispatch Rules (size: S, P1)
 
 **Path:** updates to
-`/Users/aliai/zehn/.picoclaw/config.json` → `agents.dispatch.rules`
+`/Users/aliai/.picoclaw-zehn/config.json` → `agents.dispatch.rules`
 
 **Purpose:** Add reactive routing alongside the cron cadence.
 
@@ -315,11 +315,11 @@ config keys (per source audit); pre-restart syntax check passes.
 ### Artifact 9 — Yaad Read-First / Write-Back Enforcement (size: M, P0)
 
 **Paths:**
-- `/Users/aliai/zehn/.picoclaw/workspace/memory/LOGICIGNITER_YAAD_SCHEMA_CONTRACT.md`
+- `/Users/aliai/.picoclaw-zehn/workspace/memory/LOGICIGNITER_YAAD_SCHEMA_CONTRACT.md`
   — add the read/write posture rules
-- `/Users/aliai/zehn/.picoclaw/workspace-li-ceo/AGENT.md` — add 2-line
+- `/Users/aliai/.picoclaw-zehn/workspace-li-ceo/AGENT.md` — add 2-line
   Yaad rule
-- `/Users/aliai/zehn/.picoclaw/workspace-li-coo/AGENT.md` — same
+- `/Users/aliai/.picoclaw-zehn/workspace-li-coo/AGENT.md` — same
 - Each `workspace-li-*` specialist `AGENT.md` — same
 
 **Purpose:** Stop agents rediscovering company structure on every run.
@@ -346,7 +346,7 @@ Yaad MCP calls (one read, one write) with entry IDs in the gateway log.
 ### Artifact 10 — Non-Engineering Role Deliverable Specs (size: M, P1)
 
 **Path:**
-`/Users/aliai/zehn/.picoclaw/workspace/memory/LOGICIGNITER_NON_ENG_DELIVERABLES.md`
+`/Users/aliai/.picoclaw-zehn/workspace/memory/LOGICIGNITER_NON_ENG_DELIVERABLES.md`
 
 **Purpose:** Activate CRO, CMO, CFO, Legal, CHRO, CCO. Right now they
 have personas and no concrete output. Pre-launch, they should still

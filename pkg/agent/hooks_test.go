@@ -439,7 +439,7 @@ func TestAgentLoop_Hooks_ObserverAndLLMInterceptor(t *testing.T) {
 
 	resp, err := al.runAgentLoop(context.Background(), agent, processOptions{
 		SessionKey:      "session-1",
-		Channel:         "cli",
+		Channel:         "discord",
 		ChatID:          "direct",
 		UserMessage:     "hello",
 		DefaultResponse: defaultResponse,
@@ -817,7 +817,7 @@ func TestAgentLoop_Hooks_ToolFeedbackUsesRewrittenToolName(t *testing.T) {
 
 	_, err := al.runAgentLoop(context.Background(), agent, processOptions{
 		SessionKey:      "session-1",
-		Channel:         "cli",
+		Channel:         "discord",
 		ChatID:          "direct",
 		UserMessage:     "run tool",
 		DefaultResponse: defaultResponse,

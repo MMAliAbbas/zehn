@@ -177,8 +177,8 @@ case "$repo" in
   svc-logicigniter-portal)
     restart_kind="portal"
     run_root_script scripts/local-preview/start-portal.sh
-    wait_http svc-logicigniter-portal http://localhost:8081/
-    health_summary="http://localhost:8081/ (Cloudflare tunnel: portal.logicigniter.com)"
+    wait_http svc-logicigniter-portal http://127.0.0.1:8081/
+    health_summary="http://127.0.0.1:8081/ (Cloudflare tunnel: portal.logicigniter.com)"
     ;;
   apps-*-web)
     restart_kind="app"

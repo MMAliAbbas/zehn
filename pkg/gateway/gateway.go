@@ -483,12 +483,17 @@ func setupAndStartServices(
 		fmt.Println("✓ Device event service started")
 	}
 
+	runningServices.HealthServer.SetReady(true)
 	return runningServices, nil
 }
 
 func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Duration, isReload bool) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
+
+	if runningServices.HealthServer != nil {
+		runningServices.HealthServer.SetReady(false)
+	}
 
 	// reload should not stop channel manager
 	if !isReload && runningServices.ChannelManager != nil {
@@ -701,6 +706,10 @@ func restartServices(
 	logChannelVoiceCapabilities(runningServices.ChannelManager, transcriber != nil, ttsAvailable)
 	// NOTE: PID file is written once at startup and not updated on reload.
 	// Changing the gateway listen address requires a full restart.
+
+	if runningServices.HealthServer != nil {
+		runningServices.HealthServer.SetReady(true)
+	}
 
 	return nil
 }

@@ -41,9 +41,11 @@ type HeartbeatService struct {
 	state     *state.Manager
 	handler   HeartbeatHandler
 	interval  time.Duration
+	maxRun    time.Duration
 	enabled   bool
 	mu        sync.RWMutex
 	stopChan  chan struct{}
+	active    *heartbeatRunState
 }
 
 // NewHeartbeatService creates a new heartbeat service
@@ -60,6 +62,7 @@ func NewHeartbeatService(workspace string, intervalMinutes int, enabled bool) *H
 	return &HeartbeatService{
 		workspace: workspace,
 		interval:  time.Duration(intervalMinutes) * time.Minute,
+		maxRun:    time.Duration(intervalMinutes) * time.Minute,
 		enabled:   enabled,
 		state:     state.NewManager(workspace),
 	}
@@ -77,6 +80,14 @@ func (hs *HeartbeatService) SetHandler(handler HeartbeatHandler) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	hs.handler = handler
+}
+
+// SetMaxRunDuration overrides the heartbeat run timeout. It is primarily used
+// by tests and by controlled runtime wiring; zero disables the timeout.
+func (hs *HeartbeatService) SetMaxRunDuration(timeout time.Duration) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	hs.maxRun = timeout
 }
 
 // Start begins the heartbeat service
@@ -150,6 +161,7 @@ func (hs *HeartbeatService) executeHeartbeat() {
 	hs.mu.RLock()
 	enabled := hs.enabled
 	handler := hs.handler
+	timeout := hs.maxRun
 	if !hs.enabled || hs.stopChan == nil {
 		hs.mu.RUnlock()
 		return
@@ -180,20 +192,82 @@ func (hs *HeartbeatService) executeHeartbeat() {
 	// Debug log for channel resolution
 	hs.logInfof("Resolved channel: %s, chatID: %s (from lastChannel: %s)", channel, chatID, lastChannel)
 
-	result := handler(prompt, channel, chatID)
+	runID := fmt.Sprintf("heartbeat-%d", time.Now().UnixNano())
+	startedAt := time.Now().UTC()
+	started := heartbeatRunState{
+		RunID:     runID,
+		Status:    runStatusRunning,
+		StartedAt: startedAt,
+		Channel:   channel,
+		ChatID:    chatID,
+	}
+	if !hs.tryStartRun(started) {
+		hs.logInfof("Heartbeat skipped: previous run still active")
+		hs.writeRunState(context.Background(), heartbeatRunState{
+			RunID:     runID,
+			Status:    runStatusSkipped,
+			StartedAt: startedAt,
+			Channel:   channel,
+			ChatID:    chatID,
+			Error:     "previous heartbeat run still active",
+		})
+		return
+	}
+
+	resultCh := make(chan *tools.ToolResult, 1)
+	panicCh := make(chan any, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicCh <- r
+			}
+		}()
+		resultCh <- handler(prompt, channel, chatID)
+	}()
+
+	var result *tools.ToolResult
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case result = <-resultCh:
+		case panicValue := <-panicCh:
+			errText := fmt.Sprintf("heartbeat handler panic: %v", panicValue)
+			hs.completeRun(runID, startedAt, runStatusError, channel, chatID, errText, 0)
+			hs.logErrorf("%s", errText)
+			return
+		case <-timer.C:
+			errText := fmt.Sprintf("heartbeat handler exceeded timeout %s", timeout)
+			hs.completeRun(runID, startedAt, runStatusTimeout, channel, chatID, errText, 0)
+			hs.logErrorf("%s", errText)
+			return
+		}
+	} else {
+		select {
+		case result = <-resultCh:
+		case panicValue := <-panicCh:
+			errText := fmt.Sprintf("heartbeat handler panic: %v", panicValue)
+			hs.completeRun(runID, startedAt, runStatusError, channel, chatID, errText, 0)
+			hs.logErrorf("%s", errText)
+			return
+		}
+	}
 
 	if result == nil {
+		hs.completeRun(runID, startedAt, runStatusError, channel, chatID, "heartbeat handler returned nil result", 0)
 		hs.logInfof("Heartbeat handler returned nil result")
 		return
 	}
 
 	// Handle different result types
 	if result.IsError {
+		hs.completeRun(runID, startedAt, runStatusError, channel, chatID, result.ForLLM, len(result.ForLLM)+len(result.ForUser))
 		hs.logErrorf("Heartbeat error: %s", result.ForLLM)
 		return
 	}
 
 	if result.Async {
+		hs.completeRun(runID, startedAt, runStatusAction, channel, chatID, "", len(result.ForLLM)+len(result.ForUser))
 		hs.logInfof("Async task started: %s", result.ForLLM)
 		logger.InfoCF("heartbeat", "Async heartbeat task started",
 			map[string]any{
@@ -204,6 +278,7 @@ func (hs *HeartbeatService) executeHeartbeat() {
 
 	// Check if silent
 	if result.Silent {
+		hs.completeRun(runID, startedAt, runStatusOK, channel, chatID, "", len(result.ForLLM)+len(result.ForUser))
 		hs.logInfof("Heartbeat OK - silent")
 		return
 	}
@@ -215,7 +290,48 @@ func (hs *HeartbeatService) executeHeartbeat() {
 		hs.sendResponse(result.ForLLM)
 	}
 
+	hs.completeRun(runID, startedAt, runStatusAction, channel, chatID, "", len(result.ForLLM)+len(result.ForUser))
 	hs.logInfof("Heartbeat completed: %s", result.ForLLM)
+}
+
+func (hs *HeartbeatService) tryStartRun(state heartbeatRunState) bool {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	if hs.active != nil {
+		return false
+	}
+	hs.active = &state
+	hs.writeRunState(context.Background(), state)
+	return true
+}
+
+func (hs *HeartbeatService) completeRun(
+	runID string,
+	startedAt time.Time,
+	status runStatus,
+	channel string,
+	chatID string,
+	errText string,
+	responseBytes int,
+) {
+	completedAt := time.Now().UTC()
+	state := heartbeatRunState{
+		RunID:         runID,
+		Status:        status,
+		StartedAt:     startedAt,
+		CompletedAt:   completedAt,
+		DurationMS:    completedAt.Sub(startedAt).Milliseconds(),
+		Channel:       channel,
+		ChatID:        chatID,
+		Error:         errText,
+		ResponseBytes: responseBytes,
+	}
+	hs.mu.Lock()
+	if hs.active != nil && hs.active.RunID == runID {
+		hs.active = nil
+	}
+	hs.mu.Unlock()
+	hs.writeRunState(context.Background(), state)
 }
 
 // buildPrompt builds the heartbeat prompt from HEARTBEAT.md

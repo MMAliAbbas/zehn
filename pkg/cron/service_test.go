@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -157,6 +158,39 @@ func TestCronService_ExecutionFlow(t *testing.T) {
 	status := cs.Status()
 	if status["jobs"].(int) != 0 {
 		t.Errorf("Job should be deleted after run, got count: %v", status["jobs"])
+	}
+}
+
+func TestCronService_RecurringJobRecordsErrorAndNextRun(t *testing.T) {
+	cs, path := setupService(func(job *CronJob) (string, error) {
+		return "Error: failed scheduled turn", fmt.Errorf("failed scheduled turn")
+	})
+	defer os.Remove(path)
+
+	every := int64(1000)
+	job, err := cs.AddJob("FailingRecurring", CronSchedule{Kind: "every", EveryMS: &every}, "message", "discord", "chat-1")
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	cs.executeJobByID(job.ID)
+
+	jobs := cs.ListJobs(true)
+	if len(jobs) != 1 {
+		t.Fatalf("jobs len = %d, want 1", len(jobs))
+	}
+	got := jobs[0]
+	if got.State.LastRunAtMS == nil {
+		t.Fatal("LastRunAtMS is nil, want execution timestamp")
+	}
+	if got.State.LastStatus != "error" {
+		t.Fatalf("LastStatus = %q, want error", got.State.LastStatus)
+	}
+	if !strings.Contains(got.State.LastError, "failed scheduled turn") {
+		t.Fatalf("LastError = %q, want failure detail", got.State.LastError)
+	}
+	if got.State.NextRunAtMS == nil {
+		t.Fatal("NextRunAtMS is nil, want recurring job to be rescheduled after error")
 	}
 }
 

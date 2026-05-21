@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -812,6 +813,9 @@ func setupCronTool(
 	if cronTool != nil {
 		cronService.SetOnJob(func(job *cron.CronJob) (string, error) {
 			result := cronTool.ExecuteJob(context.Background(), job)
+			if strings.HasPrefix(result, "Error:") {
+				return result, fmt.Errorf("%s", result)
+			}
 			return result, nil
 		})
 	}

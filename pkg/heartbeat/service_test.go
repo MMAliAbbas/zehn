@@ -1,9 +1,11 @@
 package heartbeat
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -163,6 +165,103 @@ func TestExecuteHeartbeat_NilResult(t *testing.T) {
 
 	// Should not panic with nil result
 	hs.executeHeartbeat()
+}
+
+func TestExecuteHeartbeat_SkipsOverlappingRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	hs.stopChan = make(chan struct{})
+	hs.SetMaxRunDuration(time.Second)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls int32
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			close(started)
+			<-release
+		}
+		return &tools.ToolResult{ForLLM: "ok", Silent: true}
+	})
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644); err != nil {
+		t.Fatalf("WriteFile(HEARTBEAT.md) error = %v", err)
+	}
+
+	doneFirst := make(chan struct{})
+	go func() {
+		hs.executeHeartbeat()
+		close(doneFirst)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first heartbeat did not start")
+	}
+
+	hs.executeHeartbeat()
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("handler calls = %d, want 1 while first heartbeat is active", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, heartbeatStatePath))
+	if err != nil {
+		t.Fatalf("ReadFile(state) error = %v", err)
+	}
+	var state heartbeatRunState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("Unmarshal(state) error = %v", err)
+	}
+	if state.Status != runStatusSkipped {
+		t.Fatalf("state.Status = %q, want %q", state.Status, runStatusSkipped)
+	}
+
+	close(release)
+	select {
+	case <-doneFirst:
+	case <-time.After(time.Second):
+		t.Fatal("first heartbeat did not finish after release")
+	}
+}
+
+func TestExecuteHeartbeat_TimesOutAndRecordsTerminalState(t *testing.T) {
+	tmpDir := t.TempDir()
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	hs.stopChan = make(chan struct{})
+	hs.SetMaxRunDuration(20 * time.Millisecond)
+
+	release := make(chan struct{})
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		<-release
+		return &tools.ToolResult{ForLLM: "late", Silent: true}
+	})
+	defer close(release)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644); err != nil {
+		t.Fatalf("WriteFile(HEARTBEAT.md) error = %v", err)
+	}
+
+	start := time.Now()
+	hs.executeHeartbeat()
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("executeHeartbeat took %s, want timeout to return quickly", elapsed)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, heartbeatStatePath))
+	if err != nil {
+		t.Fatalf("ReadFile(state) error = %v", err)
+	}
+	var state heartbeatRunState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("Unmarshal(state) error = %v", err)
+	}
+	if state.Status != runStatusTimeout {
+		t.Fatalf("state.Status = %q, want %q", state.Status, runStatusTimeout)
+	}
+	if !strings.Contains(state.Error, "exceeded timeout") {
+		t.Fatalf("state.Error = %q, want timeout detail", state.Error)
+	}
 }
 
 // TestLogPath verifies heartbeat log is written to workspace directory

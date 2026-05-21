@@ -27,6 +27,28 @@ type stubJobExecutor struct {
 	publishedKey    string
 }
 
+type blockingJobExecutor struct {
+	started chan struct{}
+}
+
+func (b *blockingJobExecutor) ProcessDirectWithChannel(
+	ctx context.Context,
+	content, sessionKey, channel, chatID string,
+) (string, error) {
+	close(b.started)
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func (b *blockingJobExecutor) PublishResponseIfNeeded(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+) {
+}
+
 func (s *stubJobExecutor) ProcessDirectWithChannel(
 	_ context.Context,
 	content, sessionKey, channel, chatID string,
@@ -53,10 +75,20 @@ func (s *stubJobExecutor) PublishResponseIfNeeded(
 
 func newTestCronToolWithExecutorAndConfig(t *testing.T, executor JobExecutor, cfg *config.Config) *CronTool {
 	t.Helper()
+	return newTestCronToolWithExecutorConfigAndTimeout(t, executor, cfg, 0)
+}
+
+func newTestCronToolWithExecutorConfigAndTimeout(
+	t *testing.T,
+	executor JobExecutor,
+	cfg *config.Config,
+	timeout time.Duration,
+) *CronTool {
+	t.Helper()
 	storePath := filepath.Join(t.TempDir(), "cron.json")
 	cronService := cron.NewCronService(storePath, nil)
 	msgBus := bus.NewMessageBus()
-	tool, err := NewCronTool(cronService, executor, msgBus, t.TempDir(), true, 0, cfg)
+	tool, err := NewCronTool(cronService, executor, msgBus, t.TempDir(), true, timeout, cfg)
 	if err != nil {
 		t.Fatalf("NewCronTool() error: %v", err)
 	}
@@ -348,5 +380,29 @@ func TestCronTool_ExecuteJobReturnsErrorWithoutPublish(t *testing.T) {
 
 	if executor.publishedResp != "" {
 		t.Fatalf("unexpected publish on error path: %q", executor.publishedResp)
+	}
+}
+
+func TestCronTool_ExecuteJobTimesOutAgentTurn(t *testing.T) {
+	executor := &blockingJobExecutor{started: make(chan struct{})}
+	tool := newTestCronToolWithExecutorConfigAndTimeout(t, executor, config.DefaultConfig(), 20*time.Millisecond)
+
+	job := &cron.CronJob{ID: "job-timeout"}
+	job.Payload.Channel = "discord"
+	job.Payload.To = "chat-1"
+	job.Payload.Message = "long scheduled agent task"
+
+	start := time.Now()
+	got := tool.ExecuteJob(context.Background(), job)
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("ExecuteJob took %s, want timeout to return quickly", elapsed)
+	}
+	if !strings.Contains(got, "context deadline exceeded") {
+		t.Fatalf("ExecuteJob() = %q, want deadline error", got)
+	}
+	select {
+	case <-executor.started:
+	default:
+		t.Fatal("executor was not called")
 	}
 }

@@ -31,6 +31,7 @@ type CronTool struct {
 	execTool     *ExecTool
 	allowCommand bool
 	execEnabled  bool
+	jobTimeout   time.Duration
 }
 
 // NewCronTool creates a new CronTool
@@ -65,6 +66,7 @@ func NewCronTool(
 		execTool:     execTool,
 		allowCommand: allowCommand,
 		execEnabled:  execEnabled,
+		jobTimeout:   execTimeout,
 	}, nil
 }
 
@@ -344,9 +346,16 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 
 	sessionKey := fmt.Sprintf("agent:cron-%s-%s", job.ID, uuid.New().String())
 
+	jobCtx := ctx
+	var cancel context.CancelFunc
+	if t.jobTimeout > 0 {
+		jobCtx, cancel = context.WithTimeout(ctx, t.jobTimeout)
+		defer cancel()
+	}
+
 	// Call agent with the job message
 	response, err := t.executor.ProcessDirectWithChannel(
-		ctx,
+		jobCtx,
 		job.Payload.Message,
 		sessionKey,
 		channel,
@@ -357,7 +366,7 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	}
 
 	if response != "" {
-		t.executor.PublishResponseIfNeeded(ctx, channel, chatID, sessionKey, response)
+		t.executor.PublishResponseIfNeeded(jobCtx, channel, chatID, sessionKey, response)
 	}
 	return "ok"
 }

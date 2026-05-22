@@ -5,29 +5,39 @@ import (
 	"sync"
 )
 
+type asyncDelegationTask func(context.Context)
+
 type asyncDelegationExecutor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	sem    chan struct{}
+	queue  chan asyncDelegationTask
 
 	mu     sync.Mutex
 	closed bool
 	wg     sync.WaitGroup
 }
 
-func newAsyncDelegationExecutor(maxConcurrent int) *asyncDelegationExecutor {
+func newAsyncDelegationExecutor(maxConcurrent, maxQueued int) *asyncDelegationExecutor {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 1
 	}
+	if maxQueued <= 0 {
+		maxQueued = maxConcurrent * 16
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &asyncDelegationExecutor{
+	e := &asyncDelegationExecutor{
 		ctx:    ctx,
 		cancel: cancel,
-		sem:    make(chan struct{}, maxConcurrent),
+		queue:  make(chan asyncDelegationTask, maxQueued),
 	}
+	e.wg.Add(maxConcurrent)
+	for range maxConcurrent {
+		go e.worker()
+	}
+	return e
 }
 
-func (e *asyncDelegationExecutor) Submit(ctx context.Context, run func(context.Context)) error {
+func (e *asyncDelegationExecutor) Submit(ctx context.Context, run asyncDelegationTask) error {
 	if e == nil {
 		return ErrAgentDelegationExecutorClosed
 	}
@@ -41,16 +51,10 @@ func (e *asyncDelegationExecutor) Submit(ctx context.Context, run func(context.C
 		return ErrAgentDelegationExecutorClosed
 	}
 	select {
-	case e.sem <- struct{}{}:
+	case e.queue <- run:
 	default:
 		return ErrAgentDelegationExecutorFull
 	}
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
-		defer func() { <-e.sem }()
-		run(e.ctx)
-	}()
 	return nil
 }
 
@@ -62,7 +66,17 @@ func (e *asyncDelegationExecutor) Close() {
 	if !e.closed {
 		e.closed = true
 		e.cancel()
+		close(e.queue)
 	}
 	e.mu.Unlock()
 	e.wg.Wait()
+}
+
+func (e *asyncDelegationExecutor) worker() {
+	defer e.wg.Done()
+	for run := range e.queue {
+		if run != nil {
+			run(e.ctx)
+		}
+	}
 }

@@ -525,6 +525,7 @@ type SubTurnConfig struct {
 
 type AsyncDelegationConfig struct {
 	MaxConcurrent int `json:"max_concurrent,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_ASYNC_DELEGATION_MAX_CONCURRENT"`
+	MaxQueued     int `json:"max_queued,omitempty"     env:"PICOCLAW_AGENTS_DEFAULTS_ASYNC_DELEGATION_MAX_QUEUED"`
 }
 
 type DelegationMemoryConfig struct {

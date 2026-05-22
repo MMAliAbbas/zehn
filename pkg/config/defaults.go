@@ -36,6 +36,7 @@ func DefaultConfig() *Config {
 				SteeringMode:              "one-at-a-time",
 				AsyncDelegation: AsyncDelegationConfig{
 					MaxConcurrent: 4,
+					MaxQueued:     64,
 				},
 				DelegationMemory: DelegationMemoryConfig{
 					Metadata: DelegationMemoryMetadataConfig{

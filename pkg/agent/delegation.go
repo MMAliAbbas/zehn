@@ -267,9 +267,15 @@ func (al *AgentLoop) runPreparedAgentDelegation(
 
 	ensureSessionMetadata(target.Sessions, sessionKey, &scope, []string{alias})
 	if err := al.delegationRecords.Running(ctx, record.DelegationID); err != nil {
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
 		return result, err
 	}
 	if err := al.persistDelegationMemory(ctx, record.DelegationID); err != nil {
+		_ = al.delegationRecords.Failed(context.Background(), record.DelegationID, err)
+		_ = al.persistDelegationMemory(context.Background(), record.DelegationID)
+		al.publishDelegationBlockerSummary(context.Background(), record, err)
 		return result, err
 	}
 

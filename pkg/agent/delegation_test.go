@@ -244,12 +244,13 @@ func TestRunAgentDelegationAsync_ReturnsIDAndPersistsCompletedResult(t *testing.
 	}
 }
 
-func TestRunAgentDelegationAsync_RejectsWhenExecutorAtCapacity(t *testing.T) {
+func TestRunAgentDelegationAsync_QueuesWhenWorkersAreAtCapacity(t *testing.T) {
 	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
 		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
 		{ID: "target"},
 	})
 	cfg.Agents.Defaults.AsyncDelegation.MaxConcurrent = 1
+	cfg.Agents.Defaults.AsyncDelegation.MaxQueued = 2
 	provider := &countingBlockingDelegationProvider{
 		started: make(chan int, 2),
 		release: make(chan struct{}),
@@ -271,13 +272,76 @@ func TestRunAgentDelegationAsync_RejectsWhenExecutorAtCapacity(t *testing.T) {
 		t.Fatal("first async delegation did not start")
 	}
 
-	rejected, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+	queued, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
 		ParentAgentID: "parent",
 		TargetAgentID: "target",
 		Task:          "second async task",
 	})
+	if err != nil {
+		t.Fatalf("second RunAgentDelegationAsync() error = %v", err)
+	}
+	rec, err := al.delegationRecords.Get(context.Background(), queued.DelegationID)
+	if err != nil {
+		t.Fatalf("Get(queued) error = %v", err)
+	}
+	if rec.Status != AgentDelegationStatusRequested {
+		t.Fatalf("queued status = %q, want requested until a worker is available", rec.Status)
+	}
+	select {
+	case call := <-provider.started:
+		t.Fatalf("queued delegation started before first released; call=%d", call)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(provider.release)
+	waitForDelegationStatus(t, al, first.DelegationID, AgentDelegationStatusCompleted)
+	waitForDelegationStatus(t, al, queued.DelegationID, AgentDelegationStatusCompleted)
+}
+
+func TestRunAgentDelegationAsync_RejectsWhenQueueAtCapacity(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	cfg.Agents.Defaults.AsyncDelegation.MaxConcurrent = 1
+	cfg.Agents.Defaults.AsyncDelegation.MaxQueued = 1
+	provider := &countingBlockingDelegationProvider{
+		started: make(chan int, 2),
+		release: make(chan struct{}),
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	defer al.Close()
+
+	first, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "first async task",
+	})
+	if err != nil {
+		t.Fatalf("first RunAgentDelegationAsync() error = %v", err)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first async delegation did not start")
+	}
+
+	queued, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "second async task",
+	})
+	if err != nil {
+		t.Fatalf("second RunAgentDelegationAsync() error = %v", err)
+	}
+
+	rejected, err := al.RunAgentDelegationAsync(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "parent",
+		TargetAgentID: "target",
+		Task:          "third async task",
+	})
 	if !errors.Is(err, ErrAgentDelegationExecutorFull) {
-		t.Fatalf("second RunAgentDelegationAsync() error = %v, want ErrAgentDelegationExecutorFull", err)
+		t.Fatalf("third RunAgentDelegationAsync() error = %v, want ErrAgentDelegationExecutorFull", err)
 	}
 	if rejected.DelegationID == "" {
 		t.Fatal("rejected delegation ID is empty")
@@ -295,6 +359,7 @@ func TestRunAgentDelegationAsync_RejectsWhenExecutorAtCapacity(t *testing.T) {
 
 	close(provider.release)
 	waitForDelegationStatus(t, al, first.DelegationID, AgentDelegationStatusCompleted)
+	waitForDelegationStatus(t, al, queued.DelegationID, AgentDelegationStatusCompleted)
 }
 
 func TestRunAgentDelegationAsync_RecordsCancelledWhenParentContextCanceledBeforeEnqueue(t *testing.T) {

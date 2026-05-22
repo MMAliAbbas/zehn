@@ -138,6 +138,7 @@ type turnExecution struct {
 	allResponsesHandled bool
 	streamingPublisher  *streamingChunkPublisher
 	streamingFallback   bool
+	suppressReasoning   bool
 	callMessages        []providers.Message
 	providerToolDefs    []providers.ToolDefinition
 	llmModel            string
@@ -179,9 +180,10 @@ func newTurnExecution(
 type turnState struct {
 	mu sync.RWMutex
 
-	agent *AgentInstance
-	opts  processOptions
-	scope turnEventScope
+	agent   *AgentInstance
+	opts    processOptions
+	profile config.EffectiveTurnProfile
+	scope   turnEventScope
 
 	turnID            string
 	agentID           string
@@ -253,6 +255,7 @@ func newTurnState(agent *AgentInstance, opts processOptions, scope turnEventScop
 	ts := &turnState{
 		agent:        agent,
 		opts:         opts,
+		profile:      opts.TurnProfile,
 		scope:        scope,
 		turnID:       scope.turnID,
 		agentID:      agent.ID,

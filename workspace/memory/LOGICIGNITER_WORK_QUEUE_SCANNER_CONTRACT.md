@@ -57,7 +57,16 @@ The scanner returns JSON with:
 - `malformed`
 - `continuation`
 - `unblock_candidates`
+- `source_warnings`
 - `next_action`
+
+Each item includes `primary_owner`. Multi-area items may include
+`supporting_owners`; these are advisory participants, not the primary assignee.
+
+Approval-gated or blocked items may include `rework_path` when comments contain
+a documented bounded rework path. `rework_path.conditions` is the authoritative
+list of required conditions. Do not rely on `rework_path.summary` alone because
+it is only a readable synopsis.
 
 `next_action.type` is one of:
 
@@ -78,3 +87,7 @@ The COO must act on `next_action`. Reporting counts without acting on
 If the scanner exits non-zero, the COO returns `SOURCE_UNAVAILABLE` with the
 failed command and retry checkpoint. Do not replace a failed scanner with a
 broad ad hoc search.
+
+If the scanner exits zero but `source_warnings` is non-empty, treat
+`next_action.type=SOURCE_UNAVAILABLE` as authoritative. Do not proceed from a
+partial queue snapshot when required GitHub comments could not be loaded.

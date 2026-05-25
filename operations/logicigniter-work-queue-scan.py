@@ -58,8 +58,10 @@ class ItemRef:
     updated_at: str
     kind: str
     comments: tuple[dict[str, str], ...] = ()
+    comments_error: str = ""
 
     def as_dict(self) -> dict[str, Any]:
+        primary_owner, supporting_owners = owners_for(self.labels)
         data: dict[str, Any] = {
             "repo": self.repo,
             "number": self.number,
@@ -68,10 +70,21 @@ class ItemRef:
             "labels": list(self.labels),
             "updated_at": self.updated_at,
             "kind": self.kind,
+            "primary_owner": primary_owner,
         }
+        if supporting_owners:
+            data["supporting_owners"] = supporting_owners
         rework = detect_rework_path(self.comments)
         if rework:
             data["rework_path"] = rework
+        if self.comments_error:
+            data["source_warning"] = {
+                "repo": self.repo,
+                "number": self.number,
+                "kind": self.kind,
+                "source": "comments",
+                "error": self.comments_error,
+            }
         return data
 
 
@@ -130,6 +143,7 @@ def normalize_issue(raw: dict[str, Any]) -> ItemRef:
         updated_at=str(raw.get("updatedAt") or raw.get("updated_at") or ""),
         kind="issue",
         comments=comment_refs(raw.get("comments")),
+        comments_error=str(raw.get("comments_error") or ""),
     )
 
 
@@ -143,6 +157,7 @@ def normalize_pr(raw: dict[str, Any]) -> ItemRef:
         updated_at=str(raw.get("updatedAt") or raw.get("updated_at") or ""),
         kind="pr",
         comments=comment_refs(raw.get("comments")),
+        comments_error=str(raw.get("comments_error") or ""),
     )
 
 
@@ -195,6 +210,10 @@ def fetch_live(limit: int) -> dict[str, list[dict[str, Any]]]:
                     issue_fields,
                     "--limit",
                     str(limit),
+                    "--sort",
+                    "updated",
+                    "--order",
+                    "desc",
                 ]
             )
         ),
@@ -211,6 +230,10 @@ def fetch_live(limit: int) -> dict[str, list[dict[str, Any]]]:
                     pr_fields,
                     "--limit",
                     str(limit),
+                    "--sort",
+                    "updated",
+                    "--order",
+                    "desc",
                 ]
             )
         ),
@@ -254,6 +277,7 @@ def detect_rework_path(comments: tuple[dict[str, str], ...]) -> dict[str, str] |
                 "source_comment_id": comment.get("id", ""),
                 "source_url": comment.get("url", ""),
                 "summary": summarize_rework(body),
+                "conditions": extract_rework_conditions(body),
             }
     return None
 
@@ -286,6 +310,64 @@ def summarize_rework(body: str) -> str:
     return " ".join(lines)[:900]
 
 
+def extract_rework_conditions(body: str) -> list[str]:
+    conditions: list[str] = []
+    collecting = False
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        lower = line.lower()
+        if not line:
+            if collecting:
+                break
+            continue
+        if (
+            "bounded merge condition" in lower
+            or "may merge if" in lower
+            or "revised so that" in lower
+        ):
+            collecting = True
+            tail = condition_tail(line)
+            if tail:
+                conditions.append(tail)
+            continue
+        if not collecting:
+            continue
+        if lower.startswith(("next step", "do not merge", "source:", "evidence:")):
+            break
+        cleaned = clean_condition_line(line)
+        if cleaned:
+            conditions.append(cleaned)
+    return dedupe_preserve_order(conditions)
+
+
+def condition_tail(line: str) -> str:
+    lower = line.lower()
+    markers = ("revised so that:", "revised so that", "may merge if", "merge condition:")
+    for marker in markers:
+        idx = lower.find(marker)
+        if idx == -1:
+            continue
+        tail = line[idx + len(marker) :].strip(" :-")
+        if tail:
+            return clean_condition_line(tail)
+    return ""
+
+
+def clean_condition_line(line: str) -> str:
+    return line.lstrip("-*0123456789. )").strip()
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
 def parse_retry_date(labels: tuple[str, ...]) -> str | None:
     for label in labels:
         if label.startswith("retry:"):
@@ -312,7 +394,7 @@ def classify(items: list[ItemRef], prs: list[ItemRef], today: dt.date) -> dict[s
     continuation: list[dict[str, Any]] = []
     unblock_candidates: list[dict[str, Any]] = []
 
-    for item in items:
+    for item in sort_refs(items):
         labels = set(item.labels)
         has_area = any(label.startswith(AREA_PREFIX) for label in labels)
         data = item.as_dict()
@@ -371,7 +453,7 @@ def classify(items: list[ItemRef], prs: list[ItemRef], today: dt.date) -> dict[s
             else:
                 ready.append(data)
 
-    open_prs = [pr.as_dict() for pr in prs]
+    open_prs = [pr.as_dict() for pr in sort_refs(prs)]
 
     return {
         "ready": ready,
@@ -386,31 +468,64 @@ def classify(items: list[ItemRef], prs: list[ItemRef], today: dt.date) -> dict[s
 
 
 def owner_for(labels: tuple[str, ...]) -> str:
-    areas = [label for label in labels if label.startswith(AREA_PREFIX)]
-    if not areas:
-        return "li-coo"
-    area = areas[0]
-    return {
-        "area:backend": "li-backend-developer",
-        "area:frontend": "li-frontend-developer",
-        "area:ux": "li-ux-designer",
-        "area:integration": "li-integration-engineer",
-        "area:data-ai": "li-data-ai-engineer",
-        "area:architecture": "li-architect",
+    return owners_for(labels)[0]
+
+
+def owners_for(labels: tuple[str, ...]) -> tuple[str, list[str]]:
+    area_to_owner = {
+        "area:docs": "li-docs",
+        "area:security": "li-security",
+        "area:legal": "li-legal",
+        "area:finance": "li-cfo",
+        "area:revenue": "li-cro",
         "area:devops": "li-devops",
         "area:qa": "li-qa",
-        "area:security": "li-security",
-        "area:docs": "li-docs",
+        "area:architecture": "li-architect",
+        "area:backend": "li-backend-developer",
+        "area:integration": "li-integration-engineer",
+        "area:frontend": "li-frontend-developer",
+        "area:ux": "li-ux-designer",
+        "area:data-ai": "li-data-ai-engineer",
         "area:product": "li-cpo",
-        "area:finance": "li-cfo",
-        "area:legal": "li-legal",
-        "area:revenue": "li-cro",
         "area:marketing": "li-marketing",
         "area:cco": "li-cco",
-    }.get(area, "li-coo")
+    }
+    priority = tuple(area_to_owner)
+    present = set(label for label in labels if label.startswith(AREA_PREFIX))
+    ordered_areas = [area for area in priority if area in present]
+    ordered_areas.extend(sorted(present - set(ordered_areas)))
+    owners = dedupe_preserve_order(
+        [area_to_owner.get(area, "li-coo") for area in ordered_areas]
+    )
+    if not owners:
+        return "li-coo", []
+    return owners[0], owners[1:]
 
+
+def sort_refs(refs: list[ItemRef]) -> list[ItemRef]:
+    return sorted(
+        refs,
+        key=lambda ref: (parse_updated(ref.updated_at), ref.repo, ref.number),
+        reverse=True,
+    )
+
+
+def parse_updated(value: str) -> dt.datetime:
+    if not value:
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    try:
+        return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
 
 def choose_next_action(snapshot: dict[str, Any]) -> dict[str, Any]:
+    if snapshot.get("source_warnings"):
+        return {
+            "type": "SOURCE_UNAVAILABLE",
+            "owner": "li-coo",
+            "target": snapshot["source_warnings"][0],
+            "reason": "required GitHub source data could not be loaded",
+        }
     if snapshot["open_prs"]:
         pr = snapshot["open_prs"][0]
         labels = tuple(pr["labels"])
@@ -483,16 +598,38 @@ def build_snapshot(raw: dict[str, Any], today: dt.date) -> dict[str, Any]:
     issues = [normalize_issue(item) for item in raw.get("issues", [])]
     prs = [normalize_pr(item) for item in raw.get("prs", [])]
     queues = classify(issues, prs, today)
+    source_warnings = collect_source_warnings(queues)
     result = {
         "schema_version": 1,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "organization": ORG,
         "label_contract": sorted(STATUS_LABELS | AREA_LABELS),
         "counts": {name: len(value) for name, value in queues.items()},
+        "source_warnings": source_warnings,
         **queues,
     }
     result["next_action"] = choose_next_action(result)
     return result
+
+
+def collect_source_warnings(queues: dict[str, Any]) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    queue_names = (
+        "ready",
+        "in_progress",
+        "open_prs",
+        "blocked",
+        "approval_gated",
+        "malformed",
+        "continuation",
+        "unblock_candidates",
+    )
+    for queue_name in queue_names:
+        for item in queues.get(queue_name, []):
+            warning = item.get("source_warning")
+            if isinstance(warning, dict) and warning not in warnings:
+                warnings.append(warning)
+    return warnings
 
 
 def main() -> int:

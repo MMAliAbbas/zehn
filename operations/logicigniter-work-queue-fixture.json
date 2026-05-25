@@ -1,0 +1,46 @@
+{
+  "issues": [
+    {
+      "repository": {"name": "svc-billing"},
+      "number": 10,
+      "title": "Implement tenant billing endpoint",
+      "url": "https://github.com/logicigniter/svc-billing/issues/10",
+      "updatedAt": "2026-05-25T00:00:00Z",
+      "labels": [{"name": "zehn:ready"}, {"name": "area:backend"}]
+    },
+    {
+      "repository": {"name": "business"},
+      "number": 20,
+      "title": "Approve launch wording",
+      "url": "https://github.com/logicigniter/business/issues/20",
+      "updatedAt": "2026-05-25T00:00:00Z",
+      "labels": [{"name": "approval:ali-required"}, {"name": "area:product"}]
+    },
+    {
+      "repository": {"name": "operations"},
+      "number": 30,
+      "title": "Repair tunnel restart path",
+      "url": "https://github.com/logicigniter/operations/issues/30",
+      "updatedAt": "2026-05-25T00:00:00Z",
+      "labels": [{"name": "zehn:blocked"}, {"name": "area:devops"}]
+    },
+    {
+      "repository": {"name": "business"},
+      "number": 40,
+      "title": "Ready but missing area",
+      "url": "https://github.com/logicigniter/business/issues/40",
+      "updatedAt": "2026-05-25T00:00:00Z",
+      "labels": [{"name": "zehn:ready"}]
+    }
+  ],
+  "prs": [
+    {
+      "repository": {"name": "config"},
+      "number": 50,
+      "title": "Review public wording",
+      "url": "https://github.com/logicigniter/config/pull/50",
+      "updatedAt": "2026-05-25T00:00:00Z",
+      "labels": []
+    }
+  ]
+}

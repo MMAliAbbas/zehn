@@ -14,6 +14,9 @@ When the scanner returns `UNBLOCK_DISPATCHED`, `APPROVAL_REQUEST`, or
 
 - `UNBLOCK_DISPATCHED`: delegate the unblock task to the role named by the
   scanner.
+- `REWORK_BLOCKER`: delegate the documented bounded rework path to the role
+  named by the scanner. Do not ask Ali again when the comments already contain
+  a safe internal rework path.
 - `ALI_APPROVAL_REQUIRED`: ask Ali one precise approval question with the
   GitHub link and consequence.
 - `BLOCKER_ISSUE_CREATED`: create or repair one GitHub issue that makes the
@@ -40,5 +43,6 @@ The following are invalid:
 - returning only blocker counts;
 - saying no work exists while `unblock_candidates` is non-empty;
 - treating missing labels as real blocker state;
+- asking Ali again when scanner output includes `rework_path`;
 - asking Ali multiple unrelated approval questions in one cycle;
 - creating duplicate comments when the blocker state has not changed.

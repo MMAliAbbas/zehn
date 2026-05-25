@@ -57,9 +57,10 @@ class ItemRef:
     labels: tuple[str, ...]
     updated_at: str
     kind: str
+    comments: tuple[dict[str, str], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "repo": self.repo,
             "number": self.number,
             "title": self.title,
@@ -68,6 +69,10 @@ class ItemRef:
             "updated_at": self.updated_at,
             "kind": self.kind,
         }
+        rework = detect_rework_path(self.comments)
+        if rework:
+            data["rework_path"] = rework
+        return data
 
 
 def run_json(args: list[str]) -> Any:
@@ -91,6 +96,21 @@ def label_names(raw_labels: Any) -> tuple[str, ...]:
     return tuple(sorted(set(names)))
 
 
+def comment_refs(raw_comments: Any) -> tuple[dict[str, str], ...]:
+    refs: list[dict[str, str]] = []
+    for comment in raw_comments or []:
+        if not isinstance(comment, dict):
+            continue
+        refs.append(
+            {
+                "id": str(comment.get("id") or ""),
+                "url": str(comment.get("url") or ""),
+                "body": str(comment.get("body") or ""),
+            }
+        )
+    return tuple(refs)
+
+
 def repo_name(raw_repo: Any) -> str:
     if isinstance(raw_repo, str):
         return raw_repo.rsplit("/", 1)[-1]
@@ -109,6 +129,7 @@ def normalize_issue(raw: dict[str, Any]) -> ItemRef:
         labels=label_names(raw.get("labels")),
         updated_at=str(raw.get("updatedAt") or raw.get("updated_at") or ""),
         kind="issue",
+        comments=comment_refs(raw.get("comments")),
     )
 
 
@@ -121,7 +142,38 @@ def normalize_pr(raw: dict[str, Any]) -> ItemRef:
         labels=label_names(raw.get("labels")),
         updated_at=str(raw.get("updatedAt") or raw.get("updated_at") or ""),
         kind="pr",
+        comments=comment_refs(raw.get("comments")),
     )
+
+
+def fetch_issue_comments(repo: str, number: int) -> list[dict[str, Any]]:
+    return run_json(
+        [
+            "gh",
+            "api",
+            f"repos/{ORG}/{repo}/issues/{number}/comments",
+            "--paginate",
+        ]
+    )
+
+
+def needs_comment_enrichment(item: dict[str, Any]) -> bool:
+    labels = set(label_names(item.get("labels")))
+    return bool(labels & {"approval:ali-required", "zehn:blocked"})
+
+
+def enrich_comments(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for item in items:
+        copy = dict(item)
+        if needs_comment_enrichment(copy):
+            repo = repo_name(copy.get("repository"))
+            try:
+                copy["comments"] = fetch_issue_comments(repo, int(copy["number"]))
+            except Exception as exc:
+                copy["comments_error"] = str(exc)
+        enriched.append(copy)
+    return enriched
 
 
 def fetch_live(limit: int) -> dict[str, list[dict[str, Any]]]:
@@ -130,35 +182,108 @@ def fetch_live(limit: int) -> dict[str, list[dict[str, Any]]]:
     issue_fields = "repository,title,number,labels,assignees,updatedAt,url"
     pr_fields = "repository,title,number,labels,updatedAt,url"
     return {
-        "issues": run_json(
-            [
-                "gh",
-                "search",
-                "issues",
-                "--owner",
-                ORG,
-                issue_query,
-                "--json",
-                issue_fields,
-                "--limit",
-                str(limit),
-            ]
+        "issues": enrich_comments(
+            run_json(
+                [
+                    "gh",
+                    "search",
+                    "issues",
+                    "--owner",
+                    ORG,
+                    issue_query,
+                    "--json",
+                    issue_fields,
+                    "--limit",
+                    str(limit),
+                ]
+            )
         ),
-        "prs": run_json(
-            [
-                "gh",
-                "search",
-                "prs",
-                "--owner",
-                ORG,
-                pr_query,
-                "--json",
-                pr_fields,
-                "--limit",
-                str(limit),
-            ]
+        "prs": enrich_comments(
+            run_json(
+                [
+                    "gh",
+                    "search",
+                    "prs",
+                    "--owner",
+                    ORG,
+                    pr_query,
+                    "--json",
+                    pr_fields,
+                    "--limit",
+                    str(limit),
+                ]
+            )
         ),
     }
+
+
+def detect_rework_path(comments: tuple[dict[str, str], ...]) -> dict[str, str] | None:
+    """Return a documented safe rework path from issue/PR comments if present."""
+    for comment in reversed(comments):
+        body = comment.get("body", "")
+        text = " ".join(body.lower().split())
+        if not text:
+            continue
+        has_rework_signal = any(
+            phrase in text
+            for phrase in (
+                "if pr #20 is revised",
+                "may merge under",
+                "may merge if",
+                "merge condition",
+                "bounded merge condition",
+                "next step: revise",
+                "revise pr",
+                "revised so that",
+                "safe path",
+                "safe rework",
+            )
+        )
+        has_hold_signal = any(
+            phrase in text
+            for phrase in (
+                "do not merge as-is",
+                "do not merge pr",
+                "not merge pr",
+                "keep blocked",
+                "blocked/unmerged",
+            )
+        )
+        if has_rework_signal and has_hold_signal:
+            return {
+                "source_comment_id": comment.get("id", ""),
+                "source_url": comment.get("url", ""),
+                "summary": summarize_rework(body),
+            }
+    return None
+
+
+def summarize_rework(body: str) -> str:
+    lines: list[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        lower = line.lower()
+        if not line:
+            continue
+        if any(
+            phrase in lower
+            for phrase in (
+                "license",
+                "agents.md",
+                "merge condition",
+                "may merge",
+                "next step",
+                "revise",
+                "safe",
+                "do not merge",
+            )
+        ):
+            lines.append(line)
+        if len(lines) >= 5:
+            break
+    if not lines:
+        return "Approval-gated item contains a documented bounded rework path."
+    return " ".join(lines)[:900]
 
 
 def parse_retry_date(labels: tuple[str, ...]) -> str | None:
@@ -194,14 +319,24 @@ def classify(items: list[ItemRef], prs: list[ItemRef], today: dt.date) -> dict[s
 
         if "approval:ali-required" in labels:
             approval_gated.append(data)
-            unblock_candidates.append(
-                {
-                    **data,
-                    "unblock_type": "approval-question",
-                    "required_owner": "li-ceo",
-                    "reason": "approval:ali-required label is present",
-                }
-            )
+            if data.get("rework_path"):
+                unblock_candidates.append(
+                    {
+                        **data,
+                        "unblock_type": "approval-safe-rework",
+                        "required_owner": owner_for(item.labels),
+                        "reason": "approval-gated item has a documented bounded rework path",
+                    }
+                )
+            else:
+                unblock_candidates.append(
+                    {
+                        **data,
+                        "unblock_type": "approval-question",
+                        "required_owner": "li-ceo",
+                        "reason": "approval:ali-required label is present",
+                    }
+                )
             continue
 
         if "zehn:blocked" in labels:
@@ -279,6 +414,13 @@ def choose_next_action(snapshot: dict[str, Any]) -> dict[str, Any]:
     if snapshot["open_prs"]:
         pr = snapshot["open_prs"][0]
         labels = tuple(pr["labels"])
+        if pr.get("rework_path"):
+            return {
+                "type": "REWORK_BLOCKER",
+                "owner": owner_for(labels),
+                "target": pr,
+                "reason": "approval-gated PR has a documented bounded rework path",
+            }
         if "approval:ali-required" in labels:
             return {
                 "type": "APPROVAL_REQUEST",
@@ -309,11 +451,12 @@ def choose_next_action(snapshot: dict[str, Any]) -> dict[str, Any]:
         }
     if snapshot["unblock_candidates"]:
         item = snapshot["unblock_candidates"][0]
-        action_type = (
-            "APPROVAL_REQUEST"
-            if item["unblock_type"] == "approval-question"
-            else "UNBLOCK_DISPATCHED"
-        )
+        if item["unblock_type"] == "approval-question":
+            action_type = "APPROVAL_REQUEST"
+        elif item["unblock_type"] == "approval-safe-rework":
+            action_type = "REWORK_BLOCKER"
+        else:
+            action_type = "UNBLOCK_DISPATCHED"
         return {
             "type": action_type,
             "owner": item["required_owner"],

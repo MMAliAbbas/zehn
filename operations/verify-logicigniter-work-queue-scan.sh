@@ -32,6 +32,18 @@ jq '.prs[0].labels=[{"name":"approval:ali-required"},{"name":"area:docs"}]' "$FI
 [ "$(jq -r '.next_action.type' "$tmp")" = "APPROVAL_REQUEST" ]
 [ "$(jq -r '.next_action.owner' "$tmp")" = "li-ceo" ]
 
+jq '.prs[0].labels=[{"name":"approval:ali-required"},{"name":"area:docs"}] |
+    .prs[0].comments=[{
+      "id":"fixture-comment-1",
+      "url":"https://github.com/logicigniter/config/pull/50#issuecomment-fixture",
+      "body":"Do not merge PR #50 as-is. Bounded merge condition: PR #50 may merge if revised so that LICENSE remains Logic Igniter LLC and AGENTS.md uses brand/legal distinction. Next step: revise PR."
+    }]' "$FIXTURE" >"$tmp.no-pr"
+"$SCANNER" --fixture "$tmp.no-pr" --today 2026-05-25 >"$tmp"
+
+[ "$(jq -r '.next_action.type' "$tmp")" = "REWORK_BLOCKER" ]
+[ "$(jq -r '.next_action.owner' "$tmp")" = "li-docs" ]
+[ "$(jq -r '.next_action.target.rework_path.source_comment_id' "$tmp")" = "fixture-comment-1" ]
+
 jq '.prs=[]' "$FIXTURE" >"$tmp.no-pr"
 "$SCANNER" --fixture "$tmp.no-pr" --today 2026-05-25 >"$tmp"
 

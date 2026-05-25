@@ -28,6 +28,9 @@ Canonical inputs:
 
 - `REVIEW_PR`: route the PR to the required reviewer/merge/reconcile owner.
 - `CLAIM_READY`: delegate the issue to the scanner-selected owner.
+- `REWORK_BLOCKER`: delegate the documented bounded rework path to the
+  scanner-selected owner. Include `target.rework_path` and do not ask Ali again
+  unless the rework path itself requires a new approval.
 - `UNBLOCK_DISPATCHED`: delegate the unblock task to the scanner-selected
   owner and include the blocker evidence.
 - `APPROVAL_REQUEST`: ask Ali one precise approval question with link and
@@ -42,6 +45,8 @@ Canonical inputs:
 
 - A blocked count alone is not a terminal outcome.
 - If `unblock_candidates` is non-empty, COO must not return no-work.
+- If `next_action.type` is `REWORK_BLOCKER`, COO must not convert it back into
+  `APPROVAL_REQUEST`.
 - If scanner counts disagree with broad search memories, trust the scanner and
   classify the mismatch as normalization work.
 - Do not start a duplicate delegation for the same issue, PR, initiative, or

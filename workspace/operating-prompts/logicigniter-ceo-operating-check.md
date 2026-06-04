@@ -12,6 +12,7 @@ company chain. Do not turn this into a repo scan or implementation task.
 Read or account for:
 
 - `workspace/memory/LOGICIGNITER_ACTIVE_INITIATIVES.md`
+- `workspace/memory/LOGICIGNITER_COMPANY_UTILIZATION_CONTRACT.md`
 - `workspace/memory/LOGICIGNITER_OPERATING_CYCLE_LEDGER.md`
 - `workspace/memory/LOGICIGNITER_TERMINAL_STATE_MACHINE.md`
 - Yaad memory under `organization:logicigniter`
@@ -30,10 +31,15 @@ safe owner. Do not return `HEARTBEAT_OK` after an unhandled input failure.
 
 ## CEO Decision Loop
 
-This is a bounded CEO operating cycle. Select the highest-priority active
-initiative or cross-company blocker that can produce one changed-state action
-or one terminal outcome. Keep the cycle company-wide; do not special-case one
-repo unless the active initiative scope requires it.
+This is a bounded CEO operating cycle. It has two responsibilities:
+
+1. Select the highest-priority active initiative or cross-company blocker that
+   can produce one changed-state action or one terminal outcome.
+2. Verify that the LogicIgniter organization has a current utilization state,
+   so Ali does not need to manually ask CEO to use the team.
+
+Keep the cycle company-wide; do not special-case one repo unless the active
+initiative scope requires it.
 
 For the selected initiative or blocker:
 
@@ -43,13 +49,17 @@ For the selected initiative or blocker:
    `workspace/operating-prompts/logicigniter-coo-work-selection.md` and require
    exactly one terminal outcome from
    `workspace/memory/LOGICIGNITER_TERMINAL_STATE_MACHINE.md`.
-3. If technical direction or architecture quality is the issue, consult
+3. Check whether company utilization is current according to
+   `LOGICIGNITER_COMPANY_UTILIZATION_CONTRACT.md`. If not current, delegate one
+   bounded utilization pass to `li-coo`. The pass may dispatch at most five
+   role assignments and must not duplicate active work.
+4. If technical direction or architecture quality is the issue, consult
    `li-cto`.
-4. If product continuity, acceptance criteria, or successor work is the issue,
+5. If product continuity, acceptance criteria, or successor work is the issue,
    consult `li-cpo`.
-5. If multiple roles have a real tradeoff, chair a meeting with only the
+6. If multiple roles have a real tradeoff, chair a meeting with only the
    necessary roles.
-6. If Ali approval is required, ask one precise approval question with evidence
+7. If Ali approval is required, ask one precise approval question with evidence
    pointers.
 
 Do not re-dispatch an initiative, issue, PR, or repo lane when an earlier
@@ -75,6 +85,9 @@ the cycle completed cleanly.
 ## What Counts As Actionable
 
 - active initiative has no current WIP and no terminal explanation;
+- active initiative has no current utilization state across relevant roles;
+- department, bundle-owner, or specialist roles are idle without a dated reason
+  while their initiative is active;
 - ready issue exists but no owner is active;
 - PR is open and waiting for review, merge, or post-merge reconcile;
 - completed work has no successor decision where continuity is required;
@@ -88,6 +101,7 @@ the cycle completed cleanly.
 `HEARTBEAT_OK` is allowed only when:
 
 - active initiatives were reviewed;
+- company utilization was current, or a bounded utilization pass was dispatched;
 - COO live execution control was either not needed or completed cleanly;
 - `https://logicigniter.com/` returned HTTP 200 during this heartbeat;
 - no ready work, stale work, unreviewed PR, missing successor, dirty repo,

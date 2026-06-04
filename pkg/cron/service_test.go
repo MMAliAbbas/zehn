@@ -194,6 +194,36 @@ func TestCronService_RecurringJobRecordsErrorAndNextRun(t *testing.T) {
 	}
 }
 
+func TestCronService_RecurringJobRecordsDegradedTerminalOutput(t *testing.T) {
+	cs, path := setupService(func(job *CronJob) (string, error) {
+		return "BLOCKED - Yaad MCP client is closing", nil
+	})
+	defer os.Remove(path)
+
+	every := int64(1000)
+	job, err := cs.AddJob("BlockedRecurring", CronSchedule{Kind: "every", EveryMS: &every}, "message", "discord", "chat-1")
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	cs.executeJobByID(job.ID)
+
+	jobs := cs.ListJobs(true)
+	if len(jobs) != 1 {
+		t.Fatalf("jobs len = %d, want 1", len(jobs))
+	}
+	got := jobs[0]
+	if got.State.LastStatus != "degraded" {
+		t.Fatalf("LastStatus = %q, want degraded", got.State.LastStatus)
+	}
+	if !strings.Contains(got.State.LastError, "BLOCKED - Yaad MCP client is closing") {
+		t.Fatalf("LastError = %q, want blocked output detail", got.State.LastError)
+	}
+	if got.State.NextRunAtMS == nil {
+		t.Fatal("NextRunAtMS is nil, want recurring job to be rescheduled after degraded output")
+	}
+}
+
 func TestCronService_PersistenceIntegrity(t *testing.T) {
 	tmpFile := "persist_test.json"
 	defer os.Remove(tmpFile)

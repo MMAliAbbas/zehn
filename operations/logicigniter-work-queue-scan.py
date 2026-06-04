@@ -526,8 +526,9 @@ def choose_next_action(snapshot: dict[str, Any]) -> dict[str, Any]:
             "target": snapshot["source_warnings"][0],
             "reason": "required GitHub source data could not be loaded",
         }
-    if snapshot["open_prs"]:
-        pr = snapshot["open_prs"][0]
+    priority_pr = choose_priority_pr(snapshot["open_prs"])
+    if priority_pr:
+        pr = priority_pr
         labels = tuple(pr["labels"])
         if pr.get("rework_path"):
             return {
@@ -554,7 +555,7 @@ def choose_next_action(snapshot: dict[str, Any]) -> dict[str, Any]:
             "type": "REVIEW_PR",
             "owner": "li-coo",
             "target": pr,
-            "reason": "open PRs outrank new issue claims because they block merge/reconcile",
+            "reason": "workflow-labeled open PR requires review, merge, or reconcile",
         }
     if snapshot["ready"]:
         item = snapshot["ready"][0]
@@ -590,8 +591,24 @@ def choose_next_action(snapshot: dict[str, Any]) -> dict[str, Any]:
         "type": "NO_CHANGED_STATE",
         "owner": "li-coo",
         "target": None,
-        "reason": "no canonical ready, PR, unblock, approval, or malformed work found",
+        "reason": "no canonical ready issue, workflow-actionable PR, unblock candidate, approval request, or malformed work found",
     }
+
+
+def choose_priority_pr(open_prs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return a PR that is explicitly workflow-actionable.
+
+    Generic unlabeled open PRs are still reported in the snapshot, but they do
+    not outrank ready issues or due unblock work. That prevents one stale PR
+    from starving the broader company queue.
+    """
+    for pr in open_prs:
+        labels = set(pr["labels"])
+        if pr.get("rework_path"):
+            return pr
+        if labels & {"approval:ali-required", "zehn:blocked", "zehn:ready"}:
+            return pr
+    return None
 
 
 def build_snapshot(raw: dict[str, Any], today: dt.date) -> dict[str, Any]:

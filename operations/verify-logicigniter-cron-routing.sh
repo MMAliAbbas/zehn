@@ -2,8 +2,12 @@
 set -euo pipefail
 
 root="${ZEHN_ROOT:-/Users/aliai/zehn}"
-config="$root/.picoclaw/config.json"
-jobs="$root/.picoclaw/workspace/cron/jobs.json"
+home_dir="${PICOCLAW_HOME:-/Users/aliai/.picoclaw-zehn}"
+if [[ ! -f "$home_dir/config.json" && -f /Users/aliai/.picoclaw-zehn/config.json ]]; then
+  home_dir="/Users/aliai/.picoclaw-zehn"
+fi
+config="$home_dir/config.json"
+jobs="$home_dir/workspace/cron/jobs.json"
 
 if [[ ! -f "$config" ]]; then
   echo "missing config: $config" >&2

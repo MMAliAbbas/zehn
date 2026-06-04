@@ -119,8 +119,9 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 
 	if delegationID != "" {
 		records, err := t.reader.ListDelegationRecords(ctx, DelegationRecordQuery{
-			DelegationID:     delegationID,
-			VisibleToAgentID: callerAgentID,
+			DelegationID:      delegationID,
+			VisibleToAgentID:  callerAgentID,
+			IncludePrivateAll: delegationStatusSupervisorCanInspectAll(callerAgentID),
 		})
 		if err != nil {
 			return ErrorResult("delegation_status error: delegation not found").WithError(err)
@@ -133,8 +134,9 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 	}
 
 	records, err := t.reader.ListDelegationRecords(ctx, DelegationRecordQuery{
-		VisibleToAgentID: callerAgentID,
-		TargetAgentID:    targetAgentID,
+		VisibleToAgentID:  callerAgentID,
+		TargetAgentID:     targetAgentID,
+		IncludePrivateAll: delegationStatusSupervisorCanInspectAll(callerAgentID),
 	})
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("delegation_status error: %v", err)).WithError(err)
@@ -143,6 +145,10 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 		return NewToolResult("No delegations found.")
 	}
 	return NewToolResult(formatDelegationRecords("Delegation status", records))
+}
+
+func delegationStatusSupervisorCanInspectAll(agentID string) bool {
+	return strings.EqualFold(strings.TrimSpace(agentID), "zehn-main")
 }
 
 type DelegationInboxTool struct {

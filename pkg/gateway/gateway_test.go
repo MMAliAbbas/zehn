@@ -15,6 +15,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
 func TestRun_StartupFailuresReturnErrorAndEmitStructuredLog(t *testing.T) {
@@ -196,6 +197,44 @@ func TestShutdownGatewayClosesMessageBus(t *testing.T) {
 	if err := msgBus.PublishVoiceControl(context.Background(), bus.VoiceControl{}); !errors.Is(err, bus.ErrBusClosed) {
 		t.Fatalf("PublishVoiceControl after shutdown error = %v, want %v", err, bus.ErrBusClosed)
 	}
+}
+
+func TestCreateHeartbeatHandlerReturnsNonOKResponsesAsVisibleAction(t *testing.T) {
+	al := agent.NewAgentLoop(
+		config.DefaultConfig(),
+		bus.NewMessageBus(),
+		&staticHeartbeatProvider{content: "BLOCKED - Yaad MCP client is closing"},
+	)
+	t.Cleanup(al.Close)
+
+	result := createHeartbeatHandler(al)("check", "discord", "chat-1")
+	if result == nil {
+		t.Fatal("heartbeat handler returned nil result")
+	}
+	if result.Silent {
+		t.Fatalf("non-OK heartbeat response should be visible, got silent result: %#v", result)
+	}
+	if result.ForLLM != "BLOCKED - Yaad MCP client is closing" {
+		t.Fatalf("ForLLM = %q, want blocked response", result.ForLLM)
+	}
+}
+
+type staticHeartbeatProvider struct {
+	content string
+}
+
+func (p *staticHeartbeatProvider) Chat(
+	_ context.Context,
+	_ []providers.Message,
+	_ []providers.ToolDefinition,
+	_ string,
+	_ map[string]any,
+) (*providers.LLMResponse, error) {
+	return &providers.LLMResponse{Content: p.content, FinishReason: "stop"}, nil
+}
+
+func (p *staticHeartbeatProvider) GetDefaultModel() string {
+	return "test-model"
 }
 
 func receiveGatewayRuntimeEvent(t *testing.T, ch <-chan runtimeevents.Event) runtimeevents.Event {

@@ -3,12 +3,13 @@
 Purpose: bounded execution-control check for `li-coo`.
 
 COO owns the company execution floor. The job is not to summarize blocked
-work; the job is to convert the highest-value queue state into one changed
-operating action.
+work; the job is to convert the highest-value queue state into changed
+operating action and keep the visible organization utilized.
 
 Canonical inputs:
 
 - `workspace/memory/LOGICIGNITER_ACTIVE_INITIATIVES.md`
+- `workspace/memory/LOGICIGNITER_COMPANY_UTILIZATION_CONTRACT.md`
 - `workspace/memory/LOGICIGNITER_TERMINAL_STATE_MACHINE.md`
 - `workspace/memory/LOGICIGNITER_WORK_QUEUE_SCANNER_CONTRACT.md`
 - `workspace/memory/LOGICIGNITER_BLOCKER_REMEDIATION_CONTRACT.md`
@@ -20,8 +21,12 @@ Canonical inputs:
    HTTP 200, return an operations blocker with owner and retry path.
 2. Run the scanner command. Do not replace it with broad `gh search` queries.
 3. Read `next_action` from the scanner JSON.
-4. Perform exactly one control-plane action for that `next_action`.
-5. Return exactly one terminal outcome with owner, evidence, next checkpoint,
+4. Perform exactly one urgent control-plane action for that `next_action`.
+5. If the request is a company utilization pass, also apply
+   `LOGICIGNITER_COMPANY_UTILIZATION_CONTRACT.md`: classify role utilization
+   and dispatch at most five idle/stale/relevant roles without duplicating
+   active work.
+6. Return exactly one terminal outcome with owner, evidence, next checkpoint,
    and Ali approval state.
 
 ## Action Mapping
@@ -51,6 +56,14 @@ Canonical inputs:
   classify the mismatch as normalization work.
 - Do not start a duplicate delegation for the same issue, PR, initiative, or
   repo lane when a previous matching delegation is still active.
+- A utilization pass must not wake every agent. It must dispatch only the
+  highest-value idle/stale roles, capped at five new assignments.
+- Bundle owners are not passive records. If portfolio launch is active and a
+  bundle owner has no work, blocker, or dated defer reason, route through
+  `li-cpo` or create/propose a bundle-readiness issue.
+- Specialists are not passive records. If claimable `area:*` work exists,
+  route it to the matching specialist from
+  `LOGICIGNITER_GITHUB_WORK_CONTRACT.md`.
 - Repo-mutating work must name the target repo and use explicit repo context
   (`cwd`, `git -C`, worktree, or temp clone). Never mutate a LogicIgniter repo
   from an agent runtime workspace.
@@ -61,6 +74,7 @@ Return:
 
 - Terminal Outcome
 - Scanner Evidence
+- Utilization Evidence
 - Action Taken
 - Owner
 - Blockers / Approval Needed

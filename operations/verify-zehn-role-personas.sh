@@ -2,7 +2,10 @@
 set -u
 
 ROOT="${ZEHN_ROOT:-/Users/aliai/zehn}"
-HOME_DIR="$ROOT/.picoclaw"
+HOME_DIR="${PICOCLAW_HOME:-/Users/aliai/.picoclaw-zehn}"
+if [ ! -f "$HOME_DIR/config.json" ] && [ -f /Users/aliai/.picoclaw-zehn/config.json ]; then
+  HOME_DIR="/Users/aliai/.picoclaw-zehn"
+fi
 failures=0
 
 fail() {

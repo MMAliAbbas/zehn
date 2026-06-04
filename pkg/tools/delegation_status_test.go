@@ -26,7 +26,7 @@ func (r *fakeDelegationRecordReader) ListDelegationRecords(ctx context.Context, 
 		if query.DelegationID != "" && rec.DelegationID != query.DelegationID {
 			continue
 		}
-		if query.VisibleToAgentID != "" && !delegationRecordVisibleToAgent(rec, query.VisibleToAgentID) {
+		if !query.IncludePrivateAll && query.VisibleToAgentID != "" && !delegationRecordVisibleToAgent(rec, query.VisibleToAgentID) {
 			continue
 		}
 		if query.TargetAgentID != "" && rec.TargetAgentID != query.TargetAgentID {
@@ -209,6 +209,29 @@ func TestDelegationStatusTool_ListFiltersRequestedByAndExplicitVisibleRecords(t 
 	}
 	if strings.Contains(result.ForLLM, "delegation-private") {
 		t.Fatalf("ForLLM leaked unrelated private delegation:\n%s", result.ForLLM)
+	}
+}
+
+func TestDelegationStatusTool_ZehnMainCanInspectNestedDelegations(t *testing.T) {
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:  "delegation-nested",
+			Status:        "completed",
+			ParentAgentID: "li-ceo",
+			TargetAgentID: "li-cto",
+			Task:          "Classify release ladder.",
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+	ctx := WithToolSessionContext(context.Background(), "zehn-main", "session", nil)
+
+	result := tool.Execute(ctx, map[string]any{"delegation_id": "delegation-nested"})
+
+	if result.IsError {
+		t.Fatalf("Execute() returned error for zehn-main supervisor: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "delegation-nested") {
+		t.Fatalf("ForLLM missing nested delegation:\n%s", result.ForLLM)
 	}
 }
 

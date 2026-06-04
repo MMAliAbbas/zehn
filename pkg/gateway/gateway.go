@@ -845,6 +845,6 @@ func createHeartbeatHandler(agentLoop *agent.AgentLoop) func(prompt, channel, ch
 		if response == "HEARTBEAT_OK" {
 			return tools.SilentResult("Heartbeat OK")
 		}
-		return tools.SilentResult(response)
+		return tools.NewToolResult(response)
 	}
 }

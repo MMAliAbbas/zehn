@@ -50,7 +50,7 @@ func newZehnGitHubArtifactWriter(defaultRepo string, timeout time.Duration) *zeh
 		timeout:     timeout,
 		resolver:    newZehnGitHubRepoResolver(defaultLogicIgniterRoot, defaultRepo),
 		execCmd: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).Output()
+			return exec.CommandContext(ctx, name, args...).CombinedOutput()
 		},
 	}
 }
@@ -85,7 +85,7 @@ func (w *zehnGitHubArtifactWriter) CreateIssue(ctx context.Context, req integrat
 
 	out, err := w.execCmd(cctx, "gh", args...)
 	if err != nil {
-		return integrationtools.GitHubIssueArtifact{}, fmt.Errorf("gh issue create: %w", err)
+		return integrationtools.GitHubIssueArtifact{}, ghCommandError("gh issue create", out, err)
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
@@ -119,10 +119,22 @@ func (w *zehnGitHubArtifactWriter) CreateComment(ctx context.Context, req integr
 	cctx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
 
-	if _, err := w.execCmd(cctx, "gh", args...); err != nil {
-		return fmt.Errorf("gh issue comment: %w", err)
+	out, err := w.execCmd(cctx, "gh", args...)
+	if err != nil {
+		return ghCommandError("gh issue comment", out, err)
 	}
 	return nil
+}
+
+func ghCommandError(operation string, output []byte, err error) error {
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+	return fmt.Errorf("%s: %w: %s", operation, err, detail)
 }
 
 // parseIssueNumberFromURL extracts the trailing integer from a canonical

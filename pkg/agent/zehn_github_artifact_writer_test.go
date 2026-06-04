@@ -94,6 +94,22 @@ func TestZehnGitHubArtifactWriter_CreateIssue_PropagatesGhError(t *testing.T) {
 	}
 }
 
+func TestZehnGitHubArtifactWriter_CreateIssue_IncludesGhOutputOnError(t *testing.T) {
+	w := newZehnGitHubArtifactWriter("logicigniter/test", time.Second)
+	w.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte("could not add label: 'delegation' not found\n"), errors.New("exit status 1")
+	}
+	_, err := w.CreateIssue(context.Background(), integrationtools.GitHubIssueRequest{
+		Title: "t", Body: "b",
+	})
+	if err == nil {
+		t.Fatal("expected error from gh")
+	}
+	if !strings.Contains(err.Error(), "could not add label") {
+		t.Fatalf("error should include gh output, got %v", err)
+	}
+}
+
 func TestZehnGitHubArtifactWriter_CreateIssue_EmptyGhOutputRejected(t *testing.T) {
 	w := newZehnGitHubArtifactWriter("logicigniter/test", time.Second)
 	w.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -231,14 +247,14 @@ func TestZehnGitHubArtifactWriter_DefaultsApplied(t *testing.T) {
 
 func TestParseIssueNumberFromURL(t *testing.T) {
 	cases := map[string]int{
-		"https://github.com/logicigniter/supervision/issues/123":  123,
-		"https://github.com/foo/bar/issues/1":                     1,
-		"https://github.com/foo/bar/issues/1/":                    1,
-		"  https://github.com/foo/bar/issues/9999\n":              9999,
-		"https://github.com/foo/bar/issues/":                      0,
-		"":                                                        0,
-		"not a url":                                               0,
-		"https://github.com/foo/bar/issues/notanumber":            0,
+		"https://github.com/logicigniter/supervision/issues/123": 123,
+		"https://github.com/foo/bar/issues/1":                    1,
+		"https://github.com/foo/bar/issues/1/":                   1,
+		"  https://github.com/foo/bar/issues/9999\n":             9999,
+		"https://github.com/foo/bar/issues/":                     0,
+		"":                                                       0,
+		"not a url":                                              0,
+		"https://github.com/foo/bar/issues/notanumber":           0,
 	}
 	for url, want := range cases {
 		if got := parseIssueNumberFromURL(url); got != want {

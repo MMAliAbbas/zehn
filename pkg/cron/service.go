@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -236,8 +237,9 @@ func (cs *CronService) executeJobByID(jobID string) {
 		callbackJob.Name, jobID, callbackJob.Schedule.Kind, callbackJob.Payload.Channel)
 
 	var err error
+	var output string
 	if cs.onJob != nil {
-		_, err = cs.onJob(callbackJob)
+		output, err = cs.onJob(callbackJob)
 	}
 
 	execDuration := time.Now().UnixMilli() - startTime
@@ -260,11 +262,16 @@ func (cs *CronService) executeJobByID(jobID string) {
 
 	job.State.LastRunAtMS = &startTime
 	job.UpdatedAtMS = time.Now().UnixMilli()
+	degraded := cronOutputIsDegraded(output)
 
 	if err != nil {
 		job.State.LastStatus = "error"
 		job.State.LastError = err.Error()
 		log.Printf("[cron] ✗ job '%s' failed after %dms: %v", job.Name, execDuration, err)
+	} else if degraded {
+		job.State.LastStatus = "degraded"
+		job.State.LastError = strings.TrimSpace(output)
+		log.Printf("[cron] ! job '%s' degraded after %dms: %s", job.Name, execDuration, job.State.LastError)
 	} else {
 		job.State.LastStatus = "ok"
 		job.State.LastError = ""
@@ -291,13 +298,34 @@ func (cs *CronService) executeJobByID(jobID string) {
 		}
 	}
 
-	if err == nil {
+	if err == nil && !degraded {
 		log.Printf("[cron] ✓ job '%s' completed in %dms, next run: %s", job.Name, execDuration, nextRunStr)
 	}
 
 	if err := cs.saveStoreUnsafe(); err != nil {
 		log.Printf("[cron] failed to save store: %v", err)
 	}
+}
+
+func cronOutputIsDegraded(output string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(output))
+	if normalized == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"BLOCKED",
+		"HEARTBEAT_BLOCKED",
+		"HEARTBEAT_INVALID",
+		"SOURCE_UNAVAILABLE",
+		"OWNER_BLOCKED",
+		"ACTION_REQUIRED",
+		"DEGRADED",
+	} {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int64 {

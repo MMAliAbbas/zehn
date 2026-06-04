@@ -19,7 +19,8 @@ trap 'rm -f "$tmp" "$tmp.no-pr"' EXIT
 
 "$SCANNER" --fixture "$FIXTURE" --today 2026-05-25 >"$tmp"
 
-[ "$(jq -r '.next_action.type' "$tmp")" = "REVIEW_PR" ]
+[ "$(jq -r '.next_action.type' "$tmp")" = "CLAIM_READY" ]
+[ "$(jq -r '.next_action.owner' "$tmp")" = "li-backend-developer" ]
 [ "$(jq -r '.counts.ready' "$tmp")" = "1" ]
 [ "$(jq -r '.counts.blocked' "$tmp")" = "1" ]
 [ "$(jq -r '.counts.approval_gated' "$tmp")" = "1" ]
@@ -55,7 +56,8 @@ jq '.prs[0].labels=[{"name":"approval:ali-required"},{"name":"area:docs"}] |
 [ "$(jq -r '.next_action.type' "$tmp")" = "SOURCE_UNAVAILABLE" ]
 jq -e '.source_warnings[0].error == "gh api timed out"' "$tmp" >/dev/null
 
-jq '.prs=[
+jq '.issues=[] |
+    .prs=[
       {
         "repository":{"name":"old-repo"},
         "number":41,
@@ -75,7 +77,7 @@ jq '.prs=[
     ]' "$FIXTURE" >"$tmp.no-pr"
 "$SCANNER" --fixture "$tmp.no-pr" --today 2026-05-25 >"$tmp"
 
-[ "$(jq -r '.next_action.target.number' "$tmp")" = "42" ]
+[ "$(jq -r '.next_action.type' "$tmp")" = "NO_CHANGED_STATE" ]
 
 jq '.prs=[]' "$FIXTURE" >"$tmp.no-pr"
 "$SCANNER" --fixture "$tmp.no-pr" --today 2026-05-25 >"$tmp"

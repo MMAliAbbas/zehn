@@ -176,7 +176,7 @@ func hydrateCodexResponseOutput(
 	}
 
 	resp.Output = outputItems
-	logger.WarnCF(
+	logger.DebugCF(
 		"provider.codex",
 		"Codex completed response had empty output; reconstructed output from streamed output_item.done events",
 		map[string]any{

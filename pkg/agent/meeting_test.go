@@ -142,6 +142,36 @@ func TestRunAgentMeeting_DelegatesParticipantsAndPersistsConsolidatedRecommendat
 	}
 }
 
+func TestParseAgentMeetingOutcome_MarkdownSections(t *testing.T) {
+	outcome := parseAgentMeetingOutcome(`## Consolidated Recommendation
+Keep PR #43 blocked until QA signs off.
+
+## Timeline
+- QA review today
+- Merge after green checks
+
+## Risks
+- Red CI
+- Missing owner
+
+## Follow-ups
+- li-qa owns current-head verification
+- li-coo posts merge decision`)
+
+	if !strings.Contains(outcome.Recommendation, "Keep PR #43 blocked") {
+		t.Fatalf("Recommendation = %q", outcome.Recommendation)
+	}
+	if got, want := strings.Join(outcome.Timeline, "|"), "QA review today|Merge after green checks"; got != want {
+		t.Fatalf("Timeline = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(outcome.Risks, "|"), "Red CI|Missing owner"; got != want {
+		t.Fatalf("Risks = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(outcome.FollowUps, "|"), "li-qa owns current-head verification|li-coo posts merge decision"; got != want {
+		t.Fatalf("FollowUps = %q, want %q", got, want)
+	}
+}
+
 func TestRunAgentMeeting_DepartmentHeadCanChairOwnDomainMeeting(t *testing.T) {
 	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
 		{ID: "cto", Subagents: &config.SubagentsConfig{AllowAgents: []string{"devops"}}},

@@ -273,6 +273,65 @@ func TestNewManager_InitialState(t *testing.T) {
 	}
 }
 
+func TestLoadFromMCPConfig_AllDeferredServersFailDegrades(t *testing.T) {
+	originalConnectServerFunc := connectServerFunc
+	t.Cleanup(func() {
+		connectServerFunc = originalConnectServerFunc
+	})
+
+	deferred := true
+	connectServerFunc = func(
+		_ context.Context,
+		name string,
+		cfg config.MCPServerConfig,
+	) (*ServerConnection, error) {
+		return nil, fmt.Errorf("connect %s failed", name)
+	}
+
+	mgr := NewManager()
+	err := mgr.LoadFromMCPConfig(context.Background(), config.MCPConfig{
+		ToolConfig: config.ToolConfig{Enabled: true},
+		Servers: map[string]config.MCPServerConfig{
+			"yaad": {Enabled: true, Deferred: &deferred, Type: "http", URL: "https://example.invalid/mcp"},
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("LoadFromMCPConfig() error = %v, want degraded nil error for deferred server", err)
+	}
+	if len(mgr.GetServers()) != 0 {
+		t.Fatalf("connected servers = %d, want 0", len(mgr.GetServers()))
+	}
+}
+
+func TestLoadFromMCPConfig_AllRequiredServersFailReturnsError(t *testing.T) {
+	originalConnectServerFunc := connectServerFunc
+	t.Cleanup(func() {
+		connectServerFunc = originalConnectServerFunc
+	})
+
+	connectServerFunc = func(
+		_ context.Context,
+		name string,
+		cfg config.MCPServerConfig,
+	) (*ServerConnection, error) {
+		return nil, fmt.Errorf("connect %s failed", name)
+	}
+
+	mgr := NewManager()
+	err := mgr.LoadFromMCPConfig(context.Background(), config.MCPConfig{
+		ToolConfig: config.ToolConfig{Enabled: true},
+		Servers: map[string]config.MCPServerConfig{
+			"required": {Enabled: true, Command: "required-mcp"},
+		},
+	}, "")
+	if err == nil {
+		t.Fatal("LoadFromMCPConfig() error = nil, want required server failure")
+	}
+	if !strings.Contains(err.Error(), "connect required failed") {
+		t.Fatalf("LoadFromMCPConfig() error = %q, want underlying connection failure", err.Error())
+	}
+}
+
 func TestConnectServerPublishesRuntimeEvents(t *testing.T) {
 	originalConnectServerFunc := connectServerFunc
 	t.Cleanup(func() {

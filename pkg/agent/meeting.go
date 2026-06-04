@@ -350,27 +350,47 @@ func appendMeetingList(sb *strings.Builder, label string, values []string) {
 
 func parseAgentMeetingOutcome(content string) AgentMeetingOutcome {
 	var outcome AgentMeetingOutcome
+	section := ""
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(strings.TrimLeft(line, "-*"))
 		if line == "" {
 			continue
 		}
+		if strings.HasPrefix(line, "#") {
+			section = meetingOutcomeSection(line)
+			continue
+		}
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
-			if outcome.Recommendation == "" {
-				outcome.Recommendation = line
+			switch section {
+			case "recommendation":
+				if outcome.Recommendation == "" {
+					outcome.Recommendation = line
+				} else {
+					outcome.Recommendation += "\n" + line
+				}
+			case "timeline":
+				outcome.Timeline = append(outcome.Timeline, line)
+			case "risks":
+				outcome.Risks = append(outcome.Risks, line)
+			case "follow-ups":
+				outcome.FollowUps = append(outcome.FollowUps, line)
+			default:
+				if outcome.Recommendation == "" {
+					outcome.Recommendation = line
+				}
 			}
 			continue
 		}
 		value = strings.TrimSpace(value)
-		switch strings.ToLower(strings.TrimSpace(key)) {
+		switch meetingOutcomeSection(key) {
 		case "recommendation", "consolidated recommendation":
 			outcome.Recommendation = value
 		case "timeline":
 			outcome.Timeline = splitMeetingItems(value)
-		case "risks", "risk":
+		case "risks":
 			outcome.Risks = splitMeetingItems(value)
-		case "follow-ups", "follow ups", "followups", "follow-up tasks":
+		case "follow-ups":
 			outcome.FollowUps = splitMeetingItems(value)
 		}
 	}
@@ -378,6 +398,23 @@ func parseAgentMeetingOutcome(content string) AgentMeetingOutcome {
 		outcome.Recommendation = strings.TrimSpace(content)
 	}
 	return outcome
+}
+
+func meetingOutcomeSection(value string) string {
+	value = strings.TrimSpace(strings.TrimLeft(value, "# "))
+	value = strings.ToLower(value)
+	switch value {
+	case "recommendation", "consolidated recommendation", "ceo recommendation":
+		return "recommendation"
+	case "timeline", "timeline concerns":
+		return "timeline"
+	case "risks", "risk":
+		return "risks"
+	case "follow-ups", "follow ups", "followups", "follow-up tasks", "next actions", "next action":
+		return "follow-ups"
+	default:
+		return value
+	}
 }
 
 func splitMeetingItems(value string) []string {

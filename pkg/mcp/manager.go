@@ -270,9 +270,17 @@ func (m *Manager) LoadFromMCPConfig(
 
 	connectedCount := len(m.GetServers())
 
-	// If all enabled servers failed to connect, return aggregated error
 	if enabledCount > 0 && connectedCount == 0 {
-		logger.ErrorCF("mcp", "All MCP servers failed to connect",
+		if allFailedServersAreDeferred(mcpCfg.Servers) {
+			logger.WarnCF("mcp", "All deferred MCP servers failed to connect; continuing without MCP tools",
+				map[string]any{
+					"failed": len(allErrors),
+					"total":  enabledCount,
+				})
+			return nil
+		}
+
+		logger.ErrorCF("mcp", "All required MCP servers failed to connect",
 			map[string]any{
 				"failed": len(allErrors),
 				"total":  enabledCount,
@@ -297,6 +305,20 @@ func (m *Manager) LoadFromMCPConfig(
 		})
 
 	return nil
+}
+
+func allFailedServersAreDeferred(servers map[string]config.MCPServerConfig) bool {
+	enabledCount := 0
+	for _, serverCfg := range servers {
+		if !serverCfg.Enabled {
+			continue
+		}
+		enabledCount++
+		if serverCfg.Deferred == nil || !*serverCfg.Deferred {
+			return false
+		}
+	}
+	return enabledCount > 0
 }
 
 // ConnectServer connects to a single MCP server

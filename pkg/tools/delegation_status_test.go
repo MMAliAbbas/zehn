@@ -263,6 +263,37 @@ func TestDelegationStatusTool_RuntimeSupervisorSendersCanInspectDelegations(t *t
 	}
 }
 
+func TestDelegationStatusTool_ListCapsNewestRecords(t *testing.T) {
+	records := make([]DelegationRecord, 0, 25)
+	for i := range 25 {
+		records = append(records, DelegationRecord{
+			DelegationID:  "delegation-cap-" + string(rune('a'+i)),
+			Status:        "completed",
+			ParentAgentID: "li-ceo",
+			TargetAgentID: "li-coo",
+			Task:          "Reconcile operating cycle.",
+			CreatedAt:     time.Date(2026, 6, 4, 12, i, 0, 0, time.UTC),
+		})
+	}
+	tool := NewDelegationStatusTool(&fakeDelegationRecordReader{records: records})
+	ctx := WithToolSessionContext(context.Background(), "zehn-main", "session", nil)
+
+	result := tool.Execute(ctx, map[string]any{"target_agent_id": "li-coo"})
+
+	if result.IsError {
+		t.Fatalf("Execute() returned error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "showing newest 20 of 25") {
+		t.Fatalf("ForLLM missing capped-count header:\n%s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "delegation-cap-a") {
+		t.Fatalf("ForLLM included oldest record despite cap:\n%s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "delegation-cap-y") {
+		t.Fatalf("ForLLM missing newest record:\n%s", result.ForLLM)
+	}
+}
+
 func TestDelegationInboxTool_ListsOnlyTargetAgentWork(t *testing.T) {
 	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
 		{

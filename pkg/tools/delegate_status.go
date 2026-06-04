@@ -77,6 +77,8 @@ type DelegationStatusTool struct {
 	reader DelegationRecordReader
 }
 
+const maxDelegationStatusRecords = 20
+
 func NewDelegationStatusTool(reader DelegationRecordReader) *DelegationStatusTool {
 	return &DelegationStatusTool{reader: reader}
 }
@@ -218,12 +220,20 @@ func formatDelegationRecords(title string, records []DelegationRecord) string {
 	records = append([]DelegationRecord(nil), records...)
 	slices.SortFunc(records, func(a, b DelegationRecord) int {
 		if cmpCreated := cmp.Compare(a.CreatedAt.UnixNano(), b.CreatedAt.UnixNano()); cmpCreated != 0 {
-			return cmpCreated
+			return -cmpCreated
 		}
-		return cmp.Compare(a.DelegationID, b.DelegationID)
+		return cmp.Compare(b.DelegationID, a.DelegationID)
 	})
+	total := len(records)
+	if len(records) > maxDelegationStatusRecords {
+		records = records[:maxDelegationStatusRecords]
+	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s (%d total):", title, len(records)))
+	if total > len(records) {
+		sb.WriteString(fmt.Sprintf("%s (showing newest %d of %d total):", title, len(records), total))
+	} else {
+		sb.WriteString(fmt.Sprintf("%s (%d total):", title, total))
+	}
 	for _, rec := range records {
 		sb.WriteString("\n")
 		sb.WriteString(formatDelegationRecord(rec))

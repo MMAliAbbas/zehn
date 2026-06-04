@@ -347,3 +347,30 @@ func TestBuildPrompt_UserTasksAfterMarkerProducePrompt(t *testing.T) {
 		t.Fatalf("prompt = %q, want user task content", prompt)
 	}
 }
+
+func TestBuildPrompt_IncludesCanonicalRuntimePaths(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Inspect runtime health"), 0o644); err != nil {
+		t.Fatalf("WriteFile(HEARTBEAT.md) error = %v", err)
+	}
+
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	prompt := hs.buildPrompt()
+	if !strings.Contains(prompt, filepath.Join(tmpDir, "heartbeat.log")) {
+		t.Fatalf("prompt = %q, want canonical workspace heartbeat log path", prompt)
+	}
+	if !strings.Contains(prompt, filepath.Join(tmpDir, "cron", "jobs.json")) {
+		t.Fatalf("prompt = %q, want canonical workspace cron jobs path", prompt)
+	}
+	if strings.Contains(prompt, filepath.Join(filepath.Dir(tmpDir), "logs", "heartbeat.log")) {
+		t.Fatalf("prompt = %q, must not point heartbeat log at logs directory", prompt)
+	}
+	if strings.Contains(prompt, filepath.Join(filepath.Dir(tmpDir), "cron", "jobs.json")) {
+		t.Fatalf("prompt = %q, must not point cron jobs at runtime-home cron directory", prompt)
+	}
+}

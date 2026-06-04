@@ -362,8 +362,29 @@ You are a proactive AI assistant. This is a scheduled heartbeat check.
 Review the following tasks and execute any necessary actions using available skills.
 If there is nothing that requires attention, respond ONLY with: HEARTBEAT_OK
 
+Canonical runtime paths for this heartbeat:
 %s
-`, now, content)
+
+%s
+`, now, hs.runtimePathHint(), content)
+}
+
+func (hs *HeartbeatService) runtimePathHint() string {
+	workspace := filepath.Clean(hs.workspace)
+	paths := []string{
+		fmt.Sprintf("- workspace: %s", workspace),
+		fmt.Sprintf("- heartbeat log: %s", filepath.Join(workspace, "heartbeat.log")),
+		fmt.Sprintf("- heartbeat state: %s", filepath.Join(workspace, heartbeatStatePath)),
+		fmt.Sprintf("- cron jobs: %s", filepath.Join(workspace, "cron", "jobs.json")),
+	}
+	if filepath.Base(workspace) == "workspace" {
+		runtimeHome := filepath.Dir(workspace)
+		paths = append(paths,
+			fmt.Sprintf("- gateway log: %s", filepath.Join(runtimeHome, "logs", "gateway.log")),
+			fmt.Sprintf("- launcher log: %s", filepath.Join(runtimeHome, "logs", "launcher.log")),
+		)
+	}
+	return strings.Join(paths, "\n")
 }
 
 // createDefaultHeartbeatTemplate creates the default HEARTBEAT.md file

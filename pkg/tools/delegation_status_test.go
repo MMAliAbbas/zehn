@@ -81,6 +81,40 @@ func TestDelegationStatusTool_MissingCallerIdentityCannotGetByID(t *testing.T) {
 	}
 }
 
+func TestDelegationStatusTool_RunningRecordBeforeToolStartIsStale(t *testing.T) {
+	startedAt := time.Date(2026, 6, 4, 19, 56, 0, 0, time.UTC)
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:  "delegation-stale",
+			Status:        "running",
+			ParentAgentID: "zehn-main",
+			TargetAgentID: "li-ceo",
+			CreatedAt:     startedAt.Add(-2 * time.Hour),
+			UpdatedAt:     startedAt.Add(-time.Hour),
+			Task:          "Execute async company lane.",
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+	tool.startedAt = startedAt
+	ctx := WithToolSessionContext(context.Background(), "zehn-main", "session", nil)
+
+	listResult := tool.Execute(ctx, map[string]any{})
+	if listResult.IsError {
+		t.Fatalf("list returned error: %s", listResult.ForLLM)
+	}
+	if !strings.Contains(listResult.ForLLM, "status=running_stale") {
+		t.Fatalf("list result = %q, want running_stale status", listResult.ForLLM)
+	}
+
+	getResult := tool.Execute(ctx, map[string]any{"delegation_id": "delegation-stale"})
+	if getResult.IsError {
+		t.Fatalf("get returned error: %s", getResult.ForLLM)
+	}
+	if !strings.Contains(getResult.ForLLM, "status=running_stale") {
+		t.Fatalf("get result = %q, want running_stale status", getResult.ForLLM)
+	}
+}
+
 func TestDelegationStatusTool_ListScopesRecordsToCallingAgent(t *testing.T) {
 	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
 		{

@@ -74,13 +74,17 @@ type DelegationRecordReader interface {
 }
 
 type DelegationStatusTool struct {
-	reader DelegationRecordReader
+	reader    DelegationRecordReader
+	startedAt time.Time
 }
 
 const maxDelegationStatusRecords = 20
 
 func NewDelegationStatusTool(reader DelegationRecordReader) *DelegationStatusTool {
-	return &DelegationStatusTool{reader: reader}
+	return &DelegationStatusTool{
+		reader:    reader,
+		startedAt: time.Now().UTC(),
+	}
 }
 
 func (t *DelegationStatusTool) Name() string {
@@ -132,7 +136,7 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 			err := fmt.Errorf("delegation %q is not visible to agent %q", delegationID, callerAgentID)
 			return ErrorResult("delegation_status error: delegation not found").WithError(err)
 		}
-		return NewToolResult(formatDelegationRecord(records[0]))
+		return NewToolResult(t.formatDelegationRecord(records[0]))
 	}
 
 	records, err := t.reader.ListDelegationRecords(ctx, DelegationRecordQuery{
@@ -146,7 +150,7 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 	if len(records) == 0 {
 		return NewToolResult("No delegations found.")
 	}
-	return NewToolResult(formatDelegationRecords("Delegation status", records))
+	return NewToolResult(t.formatDelegationRecords("Delegation status", records))
 }
 
 func delegationStatusSupervisorCanInspectAll(agentID string) bool {
@@ -217,6 +221,14 @@ func delegationRecordVisibleToAgent(rec DelegationRecord, agentID string) bool {
 }
 
 func formatDelegationRecords(title string, records []DelegationRecord) string {
+	return formatDelegationRecordsWithStart(title, records, time.Time{})
+}
+
+func (t *DelegationStatusTool) formatDelegationRecords(title string, records []DelegationRecord) string {
+	return formatDelegationRecordsWithStart(title, records, t.startedAt)
+}
+
+func formatDelegationRecordsWithStart(title string, records []DelegationRecord, startedAt time.Time) string {
 	records = append([]DelegationRecord(nil), records...)
 	slices.SortFunc(records, func(a, b DelegationRecord) int {
 		if cmpCreated := cmp.Compare(a.CreatedAt.UnixNano(), b.CreatedAt.UnixNano()); cmpCreated != 0 {
@@ -236,14 +248,26 @@ func formatDelegationRecords(title string, records []DelegationRecord) string {
 	}
 	for _, rec := range records {
 		sb.WriteString("\n")
-		sb.WriteString(formatDelegationRecord(rec))
+		sb.WriteString(formatDelegationRecordWithStart(rec, startedAt))
 	}
 	return sb.String()
 }
 
 func formatDelegationRecord(rec DelegationRecord) string {
+	return formatDelegationRecordWithStart(rec, time.Time{})
+}
+
+func (t *DelegationStatusTool) formatDelegationRecord(rec DelegationRecord) string {
+	return formatDelegationRecordWithStart(rec, t.startedAt)
+}
+
+func formatDelegationRecordWithStart(rec DelegationRecord, startedAt time.Time) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[%s] status=%s parent=%s target=%s", rec.DelegationID, rec.Status, rec.ParentAgentID, rec.TargetAgentID))
+	status := rec.Status
+	if status == "running" && !startedAt.IsZero() && !rec.UpdatedAt.IsZero() && rec.UpdatedAt.Before(startedAt) {
+		status = "running_stale"
+	}
+	sb.WriteString(fmt.Sprintf("[%s] status=%s parent=%s target=%s", rec.DelegationID, status, rec.ParentAgentID, rec.TargetAgentID))
 	if !rec.CreatedAt.IsZero() {
 		sb.WriteString(" created=")
 		sb.WriteString(rec.CreatedAt.UTC().Format("2006-01-02 15:04:05 UTC"))

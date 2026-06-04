@@ -510,6 +510,39 @@ func TestRunAgentMeetingGitHubCreatesIssueAndCuratedParticipantComments(t *testi
 	}
 }
 
+func TestRunAgentMeetingGitHubTrackerIssueUsesSupervisionRepo(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "ceo", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cro"}}},
+		{ID: "cro", Subagents: &config.SubagentsConfig{AllowAgents: []string{"cmo", "cfo"}}},
+		{ID: "cmo"},
+		{ID: "cfo"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingGitHubMeetingProvider{})
+	writer := &fakeGitHubArtifactWriter{}
+	al.SetGitHubArtifactWriter(writer)
+
+	result, err := al.StartAgentMeeting(context.Background(), tools.MeetingExecutionRequest{
+		Title:               "svc-logicigniter-web launch follow-up",
+		SponsorAgentID:      "ceo",
+		ChairAgentID:        "cro",
+		ParticipantAgentIDs: []string{"cmo", "cfo"},
+		Goal:                "Create executable follow-up work for logicigniter/svc-logicigniter-web#130.",
+		Approvals:           []string{"approval required for svc-logicigniter-web rollout"},
+	})
+	if err != nil {
+		t.Fatalf("StartAgentMeeting() error = %v", err)
+	}
+	waitForMeetingGitHubStatus(t, al, result.MeetingID, AgentGitHubArtifactStatusCreated)
+
+	issues, _ := writer.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(issues))
+	}
+	if issues[0].Repo != defaultZehnGitHubArtifactRepo {
+		t.Fatalf("issue Repo = %q, want %q", issues[0].Repo, defaultZehnGitHubArtifactRepo)
+	}
+}
+
 func TestRunAgentMeetingGitHubArtifactsUseRedactedMeetingRecord(t *testing.T) {
 	secret := "ghp_fake_meeting_secret_12345"
 	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
@@ -643,6 +676,37 @@ func TestRunAgentDelegationGitHubCreatesIssueForApprovalTrackedWork(t *testing.T
 	rec := waitForDelegationGitHubStatus(t, al, result.DelegationID, AgentGitHubArtifactStatusCreated)
 	if rec.Result == nil || len(rec.Result.ArtifactRefs) == 0 || !strings.Contains(strings.Join(rec.Result.ArtifactRefs, ","), "github.example.test") {
 		t.Fatalf("record result ArtifactRefs = %#v, want GitHub issue URL", rec.Result)
+	}
+}
+
+func TestRunAgentDelegationGitHubTrackerIssueUsesSupervisionRepo(t *testing.T) {
+	cfg := delegationConfigWithAgents(t, []config.AgentConfig{
+		{ID: "parent", Subagents: &config.SubagentsConfig{AllowAgents: []string{"target"}}},
+		{ID: "target"},
+	})
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingDelegationProvider{})
+	writer := &fakeGitHubArtifactWriter{}
+	al.SetGitHubArtifactWriter(writer)
+
+	result, err := al.RunAgentDelegation(context.Background(), AgentDelegationRequest{
+		ParentAgentID:    "parent",
+		TargetAgentID:    "target",
+		Task:             "Finish logicigniter/svc-logicigniter-web#130 and report the PR state.",
+		ThreadKey:        "svc-logicigniter-web-130",
+		ApprovalRequired: true,
+		ArtifactRefs:     []string{"https://github.com/logicigniter/svc-logicigniter-web/issues/130"},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentDelegation() error = %v", err)
+	}
+	waitForDelegationGitHubStatus(t, al, result.DelegationID, AgentGitHubArtifactStatusCreated)
+
+	issues, _ := writer.snapshot()
+	if len(issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(issues))
+	}
+	if issues[0].Repo != defaultZehnGitHubArtifactRepo {
+		t.Fatalf("issue Repo = %q, want %q", issues[0].Repo, defaultZehnGitHubArtifactRepo)
 	}
 }
 

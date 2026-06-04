@@ -614,7 +614,12 @@ func shouldReconnectCallError(err error) bool {
 	if errors.Is(err, mcp.ErrSessionMissing) {
 		return true
 	}
-	return strings.Contains(strings.ToLower(err.Error()), mcp.ErrSessionMissing.Error())
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, mcp.ErrSessionMissing.Error()) {
+		return true
+	}
+	return strings.Contains(msg, "client is closing") ||
+		strings.Contains(msg, "connection closed")
 }
 
 func (m *Manager) reconnectServer(

@@ -131,6 +131,7 @@ func (al *AgentLoop) maybePublishMeetingGitHubArtifact(
 	issueReq := integrationtools.GitHubIssueRequest{
 		SourceType: "meeting",
 		SourceID:   record.MeetingID,
+		Repo:       defaultZehnGitHubArtifactRepo,
 		Title:      "Meeting: " + record.Title,
 		Body:       buildMeetingGitHubIssueBody(record),
 		Labels:     []string{"meeting", "tracker"},
@@ -214,6 +215,7 @@ func (al *AgentLoop) maybePublishDelegationGitHubArtifact(
 	issueReq := integrationtools.GitHubIssueRequest{
 		SourceType: "delegation",
 		SourceID:   record.DelegationID,
+		Repo:       defaultZehnGitHubArtifactRepo,
 		Title:      "Delegation: " + delegationIssueTitle(record),
 		Body:       buildDelegationGitHubIssueBody(record),
 		Labels:     []string{"delegation", "tracker"},

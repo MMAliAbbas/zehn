@@ -235,6 +235,34 @@ func TestDelegationStatusTool_ZehnMainCanInspectNestedDelegations(t *testing.T) 
 	}
 }
 
+func TestDelegationStatusTool_RuntimeSupervisorSendersCanInspectDelegations(t *testing.T) {
+	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
+		{
+			DelegationID:  "delegation-runtime-visible",
+			Status:        "completed",
+			ParentAgentID: "li-ceo",
+			TargetAgentID: "li-coo",
+			Task:          "Reconcile operating cycle.",
+			CreatedAt:     time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC),
+		},
+	}}
+	tool := NewDelegationStatusTool(reader)
+	for _, callerAgentID := range []string{"heartbeat", "cron"} {
+		t.Run(callerAgentID, func(t *testing.T) {
+			ctx := WithToolSessionContext(context.Background(), callerAgentID, "session", nil)
+
+			result := tool.Execute(ctx, map[string]any{})
+
+			if result.IsError {
+				t.Fatalf("Execute() returned error for runtime supervisor %q: %s", callerAgentID, result.ForLLM)
+			}
+			if !strings.Contains(result.ForLLM, "delegation-runtime-visible") {
+				t.Fatalf("ForLLM missing runtime-visible delegation for %q:\n%s", callerAgentID, result.ForLLM)
+			}
+		})
+	}
+}
+
 func TestDelegationInboxTool_ListsOnlyTargetAgentWork(t *testing.T) {
 	reader := &fakeDelegationRecordReader{records: []DelegationRecord{
 		{

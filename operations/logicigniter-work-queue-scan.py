@@ -13,11 +13,14 @@ import datetime as dt
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
 
 ORG = "logicigniter"
+GH_COMMAND_ATTEMPTS = 3
+GH_COMMAND_RETRY_SECONDS = 1.5
 AREA_PREFIX = "area:"
 STATUS_LABELS = {
     "zehn:ready",
@@ -89,10 +92,18 @@ class ItemRef:
 
 
 def run_json(args: list[str]) -> Any:
-    proc = subprocess.run(args, check=False, text=True, capture_output=True)
-    if proc.returncode != 0:
+    errors: list[str] = []
+    for attempt in range(1, GH_COMMAND_ATTEMPTS + 1):
+        proc = subprocess.run(args, check=False, text=True, capture_output=True)
+        if proc.returncode == 0:
+            break
+        errors.append(f"attempt {attempt}: {proc.stderr.strip()}")
+        if attempt < GH_COMMAND_ATTEMPTS:
+            time.sleep(GH_COMMAND_RETRY_SECONDS)
+    else:
         raise RuntimeError(
-            f"command failed ({proc.returncode}): {' '.join(args)}\n{proc.stderr.strip()}"
+            f"command failed after {GH_COMMAND_ATTEMPTS} attempts: {' '.join(args)}\n"
+            + "\n".join(errors)
         )
     if not proc.stdout.strip():
         return []

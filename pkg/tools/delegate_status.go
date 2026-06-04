@@ -148,7 +148,12 @@ func (t *DelegationStatusTool) Execute(ctx context.Context, args map[string]any)
 }
 
 func delegationStatusSupervisorCanInspectAll(agentID string) bool {
-	return strings.EqualFold(strings.TrimSpace(agentID), "zehn-main")
+	switch strings.ToLower(strings.TrimSpace(agentID)) {
+	case "zehn-main", "main", "heartbeat", "cron":
+		return true
+	default:
+		return false
+	}
 }
 
 type DelegationInboxTool struct {

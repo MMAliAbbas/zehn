@@ -14,6 +14,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/session"
+	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 func TestDelegationRecordStore_WritesAtomicallyAndReadsAfterRestart(t *testing.T) {
@@ -313,6 +314,52 @@ func TestDelegationRecordStore_DefaultPathUsesWorkspace(t *testing.T) {
 	}
 	if al.delegationRecords.dir != want {
 		t.Fatalf("delegation store dir = %q, want %q", al.delegationRecords.dir, want)
+	}
+}
+
+func TestAgentLoopDelegationStatusReadsWorkspaceStore(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = filepath.Join(tmpDir, "workspace")
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	al.delegationRecords.now = fixedDelegationClock(time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC))
+
+	rec, err := al.delegationRecords.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "li-ceo",
+		TargetAgentID: "li-coo",
+		Task:          "Reconcile operating cycle.",
+		ThreadKey:     "logicigniter-company-operating-cycle",
+		Mode:          "async",
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+
+	if _, err := al.delegationRecords.Get(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("direct store Get(%q) error = %v", rec.DelegationID, err)
+	}
+	adapterRecords, err := al.ListDelegationRecords(context.Background(), tools.DelegationRecordQuery{
+		DelegationID:      rec.DelegationID,
+		VisibleToAgentID:  "heartbeat",
+		IncludePrivateAll: true,
+	})
+	if err != nil {
+		t.Fatalf("AgentLoop ListDelegationRecords(%q) error = %v", rec.DelegationID, err)
+	}
+	if len(adapterRecords) != 1 {
+		t.Fatalf("AgentLoop ListDelegationRecords(%q) returned %d records, want 1", rec.DelegationID, len(adapterRecords))
+	}
+
+	statusTool := tools.NewDelegationStatusTool(al)
+	ctx := tools.WithToolSessionContext(context.Background(), "heartbeat", "heartbeat", nil)
+
+	result := statusTool.Execute(ctx, map[string]any{"delegation_id": rec.DelegationID})
+
+	if result.IsError {
+		t.Fatalf("delegation_status returned error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, rec.DelegationID) {
+		t.Fatalf("delegation_status missing workspace record %q:\n%s", rec.DelegationID, result.ForLLM)
 	}
 }
 

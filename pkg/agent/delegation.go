@@ -123,9 +123,9 @@ func (al *AgentLoop) ListDelegationRecords(
 	}
 	records, err := al.delegationRecords.List(ctx, AgentDelegationRecordQuery{
 		DelegationID:      query.DelegationID,
-		VisibleToAgentID:  routing.NormalizeAgentID(query.VisibleToAgentID),
-		ParentAgentID:     routing.NormalizeAgentID(query.ParentAgentID),
-		TargetAgentID:     routing.NormalizeAgentID(query.TargetAgentID),
+		VisibleToAgentID:  normalizeDelegationQueryAgentID(query.VisibleToAgentID),
+		ParentAgentID:     normalizeDelegationQueryAgentID(query.ParentAgentID),
+		TargetAgentID:     normalizeDelegationQueryAgentID(query.TargetAgentID),
 		IncludePrivateAll: query.IncludePrivateAll,
 	})
 	if err != nil {
@@ -136,6 +136,13 @@ func (al *AgentLoop) ListDelegationRecords(
 		out = append(out, toolDelegationRecord(rec))
 	}
 	return out, nil
+}
+
+func normalizeDelegationQueryAgentID(agentID string) string {
+	if strings.TrimSpace(agentID) == "" {
+		return ""
+	}
+	return routing.NormalizeAgentID(agentID)
 }
 
 func (al *AgentLoop) prepareAgentDelegation(

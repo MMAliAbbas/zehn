@@ -215,6 +215,7 @@ func (t *ExecTool) Description() string {
 	return `Execute shell commands. Use background=true for long-running commands (returns sessionId). Use pty=true for interactive commands (can combine with background=true). Use poll/read/write/send-keys/kill with sessionId to manage background sessions. Sessions auto-cleanup 30 minutes after process exits; use kill to terminate early. Output buffer limit: 1MB.`
 }
 
+//nolint:dupl // Tool parameter schemas intentionally use similar JSON-schema map literals.
 func (t *ExecTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -670,7 +671,10 @@ func (t *ExecTool) runBackground(ctx context.Context, command, cwd string, ptyEn
 		SessionID: sessionID,
 		Status:    "running",
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(data),
 		ForUser: fmt.Sprintf("Session %s started", sessionID),
@@ -683,7 +687,10 @@ func (t *ExecTool) executeList() *ToolResult {
 	resp := ExecResponse{
 		Sessions: sessions,
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(data),
 		ForUser: fmt.Sprintf("%d active sessions", len(sessions)),
@@ -710,7 +717,10 @@ func (t *ExecTool) executePoll(args map[string]any) *ToolResult {
 		Status:    session.GetStatus(),
 		ExitCode:  session.GetExitCode(),
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(data),
 		IsError: false,
@@ -738,7 +748,10 @@ func (t *ExecTool) executeRead(args map[string]any) *ToolResult {
 		Output:    output,
 		Status:    session.GetStatus(),
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(data),
 		IsError: false,
@@ -768,7 +781,7 @@ func (t *ExecTool) executeWrite(args map[string]any) *ToolResult {
 		return ErrorResult(fmt.Sprintf("process already exited with code %d", session.GetExitCode()))
 	}
 
-	if err := session.Write(data); err != nil {
+	if err = session.Write(data); err != nil {
 		if errors.Is(err, ErrSessionDone) {
 			return ErrorResult(fmt.Sprintf("process already exited with code %d", session.GetExitCode()))
 		}
@@ -779,7 +792,10 @@ func (t *ExecTool) executeWrite(args map[string]any) *ToolResult {
 		SessionID: sessionID,
 		Status:    session.GetStatus(),
 	}
-	respData, _ := json.Marshal(resp)
+	respData, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(respData),
 		IsError: false,
@@ -804,7 +820,7 @@ func (t *ExecTool) executeKill(args map[string]any) *ToolResult {
 		return ErrorResult(fmt.Sprintf("process already exited with code %d", session.GetExitCode()))
 	}
 
-	if err := session.Kill(); err != nil {
+	if err = session.Kill(); err != nil {
 		return ErrorResult(fmt.Sprintf("failed to kill session: %v", err))
 	}
 
@@ -814,7 +830,10 @@ func (t *ExecTool) executeKill(args map[string]any) *ToolResult {
 		SessionID: sessionID,
 		Status:    "done",
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(data),
 		ForUser: fmt.Sprintf("Session %s killed", sessionID),
@@ -1026,7 +1045,7 @@ func (t *ExecTool) executeSendKeys(args map[string]any) *ToolResult {
 		return ErrorResult(fmt.Sprintf("process already exited with code %d", session.GetExitCode()))
 	}
 
-	if err := session.Write(data); err != nil {
+	if err = session.Write(data); err != nil {
 		if errors.Is(err, ErrSessionDone) {
 			return ErrorResult(fmt.Sprintf("process already exited with code %d", session.GetExitCode()))
 		}
@@ -1038,7 +1057,10 @@ func (t *ExecTool) executeSendKeys(args map[string]any) *ToolResult {
 		Status:    "running",
 		Output:    fmt.Sprintf("Sent keys: %v", keys),
 	}
-	respData, _ := json.Marshal(resp)
+	respData, err := json.Marshal(resp)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
 	return &ToolResult{
 		ForLLM:  string(respData),
 		IsError: false,

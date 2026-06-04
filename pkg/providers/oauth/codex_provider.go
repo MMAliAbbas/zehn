@@ -105,10 +105,13 @@ func (p *CodexProvider) Chat(
 
 	var resp *responses.Response
 	var outputItems []responses.ResponseOutputItemUnion
+	var streamedText strings.Builder
 	for stream.Next() {
 		evt := stream.Current()
 		if evt.Type == "response.output_item.done" {
 			outputItems = append(outputItems, evt.Item)
+		} else if evt.Type == "response.output_text.delta" {
+			streamedText.WriteString(evt.Delta)
 		}
 		if evt.Type == "response.completed" || evt.Type == "response.failed" || evt.Type == "response.incomplete" {
 			evtResp := evt.Response
@@ -158,7 +161,11 @@ func (p *CodexProvider) Chat(
 	}
 
 	resp = hydrateCodexResponseOutput(resp, outputItems, model, resolvedModel, accountID)
-	return orc.ParseResponseFromStruct(resp), nil
+	parsed := orc.ParseResponseFromStruct(resp)
+	if parsed.Content == "" && streamedText.Len() > 0 {
+		parsed.Content = streamedText.String()
+	}
+	return parsed, nil
 }
 
 func hydrateCodexResponseOutput(

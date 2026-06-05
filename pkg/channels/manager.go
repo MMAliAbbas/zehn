@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"sort"
@@ -33,10 +34,22 @@ import (
 const (
 	defaultChannelQueueSize = 16
 	defaultRateLimit        = 10 // default 10 msg/s
-	maxRetries              = 3
-	rateLimitDelay          = 1 * time.Second
-	baseBackoff             = 500 * time.Millisecond
-	maxBackoff              = 8 * time.Second
+
+	// maxRetries was 3 prior to 2026-06-06. The 3-retry pattern (~3.5s
+	// total backoff) was too short to ride out a typical Discord
+	// WebSocket reconnect (often 5-30s), causing the gateway log to fill
+	// with "discord send: temporary failure" entries that silently
+	// dropped messages. Bumping to 5 gives backoffs 500ms+1s+2s+4s+8s
+	// ≈ 15.5s total worst-case, which covers most observed blips while
+	// not blocking the worker indefinitely.
+	maxRetries           = 5
+	rateLimitDelay       = 1 * time.Second
+	baseBackoff          = 500 * time.Millisecond
+	maxBackoff           = 8 * time.Second
+	// backoffJitterFactor adds ±25% to the computed backoff to break
+	// thundering-herd patterns when many queued messages all retry at the
+	// same instant after a Discord reconnect.
+	backoffJitterFactor = 0.25
 
 	janitorInterval = 10 * time.Second
 	typingStopTTL   = 5 * time.Minute
@@ -1573,8 +1586,16 @@ func (m *Manager) sendWithRetry(
 			}
 		}
 
-		// ErrTemporary or unknown error — exponential backoff
+		// ErrTemporary or unknown error — exponential backoff with jitter.
+		// Jitter (±25%) prevents a thundering-herd of queued messages
+		// from retrying at exactly the same instant after a Discord (or
+		// other upstream) reconnect.
 		backoff := min(time.Duration(float64(baseBackoff)*math.Pow(2, float64(attempt))), maxBackoff)
+		jitter := time.Duration(float64(backoff) * backoffJitterFactor * (2*rand.Float64() - 1))
+		backoff += jitter
+		if backoff < 0 {
+			backoff = 0
+		}
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
@@ -1768,8 +1789,16 @@ func (m *Manager) sendMediaWithRetry(
 			}
 		}
 
-		// ErrTemporary or unknown error — exponential backoff
+		// ErrTemporary or unknown error — exponential backoff with jitter.
+		// Jitter (±25%) prevents a thundering-herd of queued messages
+		// from retrying at exactly the same instant after a Discord (or
+		// other upstream) reconnect.
 		backoff := min(time.Duration(float64(baseBackoff)*math.Pow(2, float64(attempt))), maxBackoff)
+		jitter := time.Duration(float64(backoff) * backoffJitterFactor * (2*rand.Float64() - 1))
+		backoff += jitter
+		if backoff < 0 {
+			backoff = 0
+		}
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():

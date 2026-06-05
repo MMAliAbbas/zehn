@@ -18,6 +18,7 @@ type Server struct {
 	mu         sync.RWMutex
 	ready      bool
 	checks     map[string]Check
+	liveChecks map[string]func() (bool, string)
 	startTime  time.Time
 	reloadFunc func() error
 	authToken  string // optional bearer token for protected endpoints
@@ -40,10 +41,11 @@ type StatusResponse struct {
 func NewServer(host string, port int, token string) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
-		ready:     false,
-		checks:    make(map[string]Check),
-		startTime: time.Now(),
-		authToken: token,
+		ready:      false,
+		checks:     make(map[string]Check),
+		liveChecks: make(map[string]func() (bool, string)),
+		startTime:  time.Now(),
+		authToken:  token,
 	}
 
 	mux.HandleFunc("/health", s.healthHandler)
@@ -99,6 +101,12 @@ func (s *Server) SetReady(ready bool) {
 	s.mu.Unlock()
 }
 
+// RegisterCheck stores a one-shot check result. The check function is called
+// exactly once, at registration time, and the result is cached. This is
+// appropriate for static or rarely-changing readiness signals (e.g., "config
+// loaded successfully"). For checks that need to reflect live state on every
+// /ready probe (e.g., is the Discord WebSocket currently connected?), use
+// RegisterLiveCheck instead.
 func (s *Server) RegisterCheck(name string, checkFn func() (bool, string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,6 +118,25 @@ func (s *Server) RegisterCheck(name string, checkFn func() (bool, string)) {
 		Message:   msg,
 		Timestamp: time.Now(),
 	}
+}
+
+// RegisterLiveCheck stores a check function that is evaluated on every
+// /ready request. The function should be cheap (a few hundred microseconds at
+// most) and non-blocking; expensive readiness probes belong in a background
+// goroutine that flips a cached state which the live check then returns.
+// Live checks cause /ready to return 503 when any of them returns false.
+// Registering a live check with the same name replaces the previous function.
+func (s *Server) RegisterLiveCheck(name string, fn func() (bool, string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.liveChecks[name] = fn
+}
+
+// UnregisterLiveCheck removes a previously-registered live check.
+func (s *Server) UnregisterLiveCheck(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.liveChecks, name)
 }
 
 // SetReloadFunc sets the callback function for config reload.
@@ -186,7 +213,24 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	ready := s.ready
 	checks := make(map[string]Check)
 	maps.Copy(checks, s.checks)
+	liveCheckFns := make(map[string]func() (bool, string), len(s.liveChecks))
+	for k, v := range s.liveChecks {
+		liveCheckFns[k] = v
+	}
 	s.mu.RUnlock()
+
+	// Evaluate live checks NOW (each /ready request). Done outside the lock
+	// so a slow check doesn't block other readers.
+	now := time.Now()
+	for name, fn := range liveCheckFns {
+		ok, msg := fn()
+		checks[name] = Check{
+			Name:      name,
+			Status:    statusString(ok),
+			Message:   msg,
+			Timestamp: now,
+		}
+	}
 
 	if !ready {
 		w.WriteHeader(http.StatusServiceUnavailable)

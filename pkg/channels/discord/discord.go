@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -29,7 +30,43 @@ import (
 
 const (
 	sendTimeout = 10 * time.Second
+
+	// Connection state used by the live /ready health check and the
+	// reconnect watchdog. Stored as atomic uint32 on DiscordChannel.
+	discordStateConnecting   uint32 = 0
+	discordStateConnected    uint32 = 1
+	discordStateDisconnected uint32 = 2
+	discordStateInvalid      uint32 = 3 // server told us our session is invalid; usually fatal
+
+	// Liveness threshold: if more than this elapsed since the last event
+	// from Discord (heartbeat ack, gateway message, anything), HealthCheck
+	// returns false. discordgo sends heartbeat acks every ~41s, so 90s is
+	// "missed at least two heartbeats."
+	discordEventStalenessThreshold = 90 * time.Second
+
+	// Watchdog: if we observe state==Disconnected for this long AND
+	// haven't attempted a reconnect in the last reconnectAttemptCooldown,
+	// force a new session.Open(). discordgo has its own auto-reconnect, but
+	// it gives up under some conditions; this is the backstop.
+	watchdogReconnectAfter       = 30 * time.Second
+	reconnectAttemptCooldown     = 15 * time.Second
+	watchdogTickInterval         = 10 * time.Second
 )
+
+func discordStateName(s uint32) string {
+	switch s {
+	case discordStateConnecting:
+		return "connecting"
+	case discordStateConnected:
+		return "connected"
+	case discordStateDisconnected:
+		return "disconnected"
+	case discordStateInvalid:
+		return "invalid"
+	default:
+		return "unknown"
+	}
+}
 
 var (
 	// Pre-compiled regexes for resolveDiscordRefs (avoid re-compiling per call)
@@ -59,6 +96,11 @@ type DiscordChannel struct {
 	ttsMu     sync.Mutex
 	cancelTTS context.CancelFunc
 	ttsPlayID uint64
+
+	// Connection liveness tracking. All fields are accessed atomically.
+	connState           atomic.Uint32 // discordState* const
+	lastEventNanos      atomic.Int64  // unix nanos of last received gateway event
+	lastReconnectNanos  atomic.Int64  // unix nanos of last forced reconnect attempt
 }
 
 func NewDiscordChannel(
@@ -116,15 +158,36 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 	}
 	c.botUserID = botUser.ID
 
+	// Liveness observability: register handlers for every state transition
+	// discordgo exposes. Without these, the gateway has no way to know
+	// whether Discord is currently reachable; /health and /ready stay green
+	// while messages silently disappear.
+	c.connState.Store(discordStateConnecting)
+	c.session.AddHandler(c.onReady)
+	c.session.AddHandler(c.onConnect)
+	c.session.AddHandler(c.onDisconnect)
+	c.session.AddHandler(c.onResumed)
+	// NOTE: the discordgo fork does not expose InvalidSession as a public
+	// event type. That failure mode will manifest as a missing Ready or a
+	// Disconnect that never gets a matching Connect; the watchdog catches
+	// both cases via staleness on lastEventNanos.
+
 	c.session.AddHandler(c.handleMessage)
 
 	go c.listenVoiceControl(c.ctx)
 
 	if err := c.session.Open(); err != nil {
+		c.connState.Store(discordStateDisconnected)
 		return fmt.Errorf("failed to open discord session: %w", err)
 	}
 
 	c.SetRunning(true)
+
+	// Reconnect watchdog: discordgo handles transient disconnects on its
+	// own, but historical evidence (gateway.log archive from May 2026)
+	// shows it can stall after persistent failures. This backstop forces a
+	// new Open() when the state has been Disconnected too long.
+	go c.reconnectWatchdog(c.ctx)
 
 	logger.InfoCF("discord", "Discord bot connected", map[string]any{
 		"username": botUser.Username,
@@ -132,6 +195,101 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 	})
 
 	return nil
+}
+
+// markEvent records that we just received something from Discord. Called by
+// every event handler to drive HealthCheck staleness logic.
+func (c *DiscordChannel) markEvent() {
+	c.lastEventNanos.Store(time.Now().UnixNano())
+}
+
+func (c *DiscordChannel) onReady(_ *discordgo.Session, e *discordgo.Ready) {
+	c.connState.Store(discordStateConnected)
+	c.markEvent()
+	logger.InfoCF("discord", "Discord gateway READY",
+		map[string]any{"session_id": e.SessionID, "user": e.User.Username})
+}
+
+func (c *DiscordChannel) onConnect(_ *discordgo.Session, _ *discordgo.Connect) {
+	c.connState.Store(discordStateConnected)
+	c.markEvent()
+	logger.InfoC("discord", "Discord gateway connected")
+}
+
+func (c *DiscordChannel) onDisconnect(_ *discordgo.Session, _ *discordgo.Disconnect) {
+	c.connState.Store(discordStateDisconnected)
+	logger.WarnC("discord", "Discord gateway disconnected")
+}
+
+func (c *DiscordChannel) onResumed(_ *discordgo.Session, e *discordgo.Resumed) {
+	c.connState.Store(discordStateConnected)
+	c.markEvent()
+	logger.InfoCF("discord", "Discord gateway resumed",
+		map[string]any{"trace": e.Trace})
+}
+
+// HealthCheck implements the channels.LiveHealthChecker interface. It returns
+// false when the Discord session is not in a Connected state OR when no event
+// has arrived from Discord recently (suggesting heartbeats are silently
+// failing). When false, /ready returns 503 with the detail message.
+func (c *DiscordChannel) HealthCheck() (bool, string) {
+	state := c.connState.Load()
+	lastEvent := c.lastEventNanos.Load()
+	if lastEvent == 0 {
+		// We've never received an event. Could be in startup; report not-ready
+		// rather than ok so /ready doesn't lie during the connection window.
+		return false, "no Discord events received yet (state=" + discordStateName(state) + ")"
+	}
+	age := time.Since(time.Unix(0, lastEvent))
+	if state != discordStateConnected {
+		return false, "Discord state=" + discordStateName(state) + " last_event_age=" + age.String()
+	}
+	if age > discordEventStalenessThreshold {
+		return false, "Discord state=connected but last_event_age=" + age.String() + " (likely heartbeat failing)"
+	}
+	return true, "state=connected last_event_age=" + age.String()
+}
+
+// reconnectWatchdog periodically checks the Discord state and forces a new
+// session.Open() if we've been Disconnected too long. discordgo's built-in
+// auto-reconnect normally handles this, but it can give up under persistent
+// network failure; this is the backstop documented in the 2026-06-05 audit.
+func (c *DiscordChannel) reconnectWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(watchdogTickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			state := c.connState.Load()
+			if state == discordStateConnected {
+				continue
+			}
+			// Check how long we've been disconnected. Use lastEventNanos as
+			// proxy: if we've recently received an event we're effectively
+			// connected even if a transient Disconnect handler fired.
+			lastEvent := c.lastEventNanos.Load()
+			if lastEvent > 0 && time.Since(time.Unix(0, lastEvent)) < watchdogReconnectAfter {
+				continue
+			}
+			// Check cooldown to avoid hammering Discord with Open() calls.
+			lastAttempt := c.lastReconnectNanos.Load()
+			if lastAttempt > 0 && time.Since(time.Unix(0, lastAttempt)) < reconnectAttemptCooldown {
+				continue
+			}
+			c.lastReconnectNanos.Store(time.Now().UnixNano())
+			logger.WarnCF("discord", "Reconnect watchdog forcing session.Open()",
+				map[string]any{
+					"state":          discordStateName(state),
+					"last_event_age": time.Since(time.Unix(0, lastEvent)).String(),
+				})
+			if err := c.session.Open(); err != nil {
+				logger.ErrorCF("discord", "Reconnect watchdog session.Open() failed",
+					map[string]any{"error": err.Error()})
+			}
+		}
+	}
 }
 
 func (c *DiscordChannel) Stop(ctx context.Context) error {

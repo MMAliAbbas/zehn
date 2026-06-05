@@ -95,6 +95,7 @@ type Manager struct {
 	mux                       *dynamicServeMux
 	httpServer                *http.Server
 	httpListeners             []net.Listener
+	healthServer              *health.Server // for live channel readiness checks; nil until SetupHTTPServer is called
 	mu                        sync.RWMutex
 	placeholders              sync.Map          // "channel:chatID" → placeholderID (string)
 	typingStops               sync.Map          // "channel:chatID" → func()
@@ -1093,6 +1094,11 @@ func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 // When listeners is empty it falls back to Addr-based ListenAndServe behavior.
 func (m *Manager) SetupHTTPServerListeners(listeners []net.Listener, addr string, healthServer *health.Server) {
 	m.mux = newDynamicServeMux()
+	// Store healthServer so per-channel LiveHealthChecker registration in
+	// registerChannelHTTPHandler can hook into /ready. Without this, the
+	// gateway's /health and /ready stay green when an external channel
+	// (notably Discord) silently disconnects.
+	m.healthServer = healthServer
 
 	// Register health endpoints
 	if healthServer != nil {
@@ -1144,6 +1150,11 @@ func (m *Manager) registerChannelHTTPHandler(name string, ch Channel) {
 			"path":    hc.HealthPath(),
 		})
 	}
+	if lhc, ok := ch.(LiveHealthChecker); ok && m.healthServer != nil {
+		m.healthServer.RegisterLiveCheck("channel:"+name, lhc.HealthCheck)
+		logger.InfoCF("channels", "Live health check registered (contributes to /ready)",
+			map[string]any{"channel": name})
+	}
 }
 
 // unregisterChannelHTTPHandler removes the webhook/health handlers for a
@@ -1169,6 +1180,11 @@ func (m *Manager) unregisterChannelHTTPHandler(name string, ch Channel) {
 			"channel": name,
 			"path":    hc.HealthPath(),
 		})
+	}
+	if _, ok := ch.(LiveHealthChecker); ok && m.healthServer != nil {
+		m.healthServer.UnregisterLiveCheck("channel:" + name)
+		logger.InfoCF("channels", "Live health check unregistered",
+			map[string]any{"channel": name})
 	}
 }
 

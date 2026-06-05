@@ -6,16 +6,18 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func newTestServer() *Server {
 	s := &Server{
-		ready:     false,
-		checks:    make(map[string]Check),
-		startTime: time.Now(),
-		authToken: "test",
+		ready:      false,
+		checks:     make(map[string]Check),
+		liveChecks: make(map[string]func() (bool, string)),
+		startTime:  time.Now(),
+		authToken:  "test",
 	}
 	return s
 }
@@ -354,5 +356,65 @@ func TestStatusString(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("statusString(%v) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestRegisterLiveCheck_EvaluatesOnEachReadyRequest(t *testing.T) {
+	s := newTestServer()
+	s.SetReady(true)
+
+	// Live check whose result can change between requests.
+	var live atomic.Bool
+	live.Store(true) // initially healthy
+	s.RegisterLiveCheck("discord", func() (bool, string) {
+		if live.Load() {
+			return true, "connected"
+		}
+		return false, "disconnected"
+	})
+
+	// First request: live=true → /ready should return 200.
+	w := httptest.NewRecorder()
+	s.readyHandler(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("first request: status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Flip live state to false (no re-registration). The cached one-shot
+	// Check would stay at "ok" here; the LiveCheck must re-evaluate.
+	live.Store(false)
+	w = httptest.NewRecorder()
+	s.readyHandler(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("after live state flip: status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	// Flip back to true: /ready should recover without re-registration.
+	live.Store(true)
+	w = httptest.NewRecorder()
+	s.readyHandler(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("after recovery: status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestUnregisterLiveCheck_RemovesFromReady(t *testing.T) {
+	s := newTestServer()
+	s.SetReady(true)
+
+	s.RegisterLiveCheck("discord", func() (bool, string) {
+		return false, "disconnected"
+	})
+	w := httptest.NewRecorder()
+	s.readyHandler(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("with failing live check: status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	s.UnregisterLiveCheck("discord")
+	w = httptest.NewRecorder()
+	s.readyHandler(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("after unregister: status = %d, want %d", w.Code, http.StatusOK)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -591,10 +592,61 @@ func (m *Manager) CallTool(
 			}
 		}
 
+		// One-shot retry for transient HTTP 5xx errors (Bad Gateway,
+		// Service Unavailable, Gateway Timeout) where the session is
+		// still alive but the upstream returned a non-payload-carrying
+		// error. Observed under live Yaad load on 2026-06-05 where one
+		// memory_query failed with Bad Gateway and was abandoned. Single
+		// retry with a small backoff. Does NOT reconnect — reconnect is
+		// already handled by the session-loss branch above.
+		if shouldRetryTransientHTTPError(err) {
+			logger.WarnCF("mcp", "MCP transient HTTP error, retrying once",
+				map[string]any{
+					"server": serverName,
+					"tool":   toolName,
+					"error":  err.Error(),
+				})
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("failed to call tool: %w", ctx.Err())
+			case <-time.After(transientRetryDelay):
+			}
+			result, err = conn.Session.CallTool(ctx, params)
+			if err == nil {
+				return result, nil
+			}
+		}
+
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
 	return result, nil
+}
+
+// transientRetryDelay is the wait between an initial transient-5xx failure
+// and the one-shot retry. Kept small so cron-bounded turns don't lose
+// budget; large enough to clear most upstream cloudflare-style hiccups.
+var transientRetryDelay = 250 * time.Millisecond
+
+// shouldRetryTransientHTTPError reports whether the MCP CallTool error
+// looks like a transient upstream HTTP 5xx that did NOT close the session.
+// Used for a single retry with backoff. Does not match session-loss
+// errors (those are handled by shouldReconnectCallError).
+func shouldRetryTransientHTTPError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Exclude session-loss errors — those are reconnect, not retry.
+	if strings.Contains(msg, "client is closing") || strings.Contains(msg, "connection closed") {
+		return false
+	}
+	return strings.Contains(msg, "bad gateway") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "service unavailable") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "gateway timeout") ||
+		strings.Contains(msg, "504")
 }
 
 func listServerTools(

@@ -903,3 +903,28 @@ func (t *scriptedTransport) Close() error {
 func (t *scriptedTransport) SessionID() string {
 	return t.sessionID
 }
+
+func TestShouldRetryTransientHTTPError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain wrap of Bad Gateway", fmt.Errorf(`sending "tools/call": rejected by transport: Bad Gateway`), true},
+		{"503 service unavailable", fmt.Errorf("upstream 503 service unavailable"), true},
+		{"504 gateway timeout", fmt.Errorf("rejected by transport: 504 Gateway Timeout"), true},
+		{"502 numeric", fmt.Errorf("transport: 502"), true},
+		{"session loss (client is closing) — must NOT retry as transient", fmt.Errorf(`connection closed: calling "tools/call": client is closing: sending "tools/call":`), false},
+		{"session missing — must NOT retry as transient", fmt.Errorf("session ID missing"), false},
+		{"conflict error — not transient", fmt.Errorf("MCP tool returned error: conflict"), false},
+		{"random unrelated", fmt.Errorf("something else broke"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRetryTransientHTTPError(tc.err); got != tc.want {
+				t.Fatalf("shouldRetryTransientHTTPError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

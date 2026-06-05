@@ -258,8 +258,24 @@ func (t *MCPTool) Execute(ctx context.Context, args map[string]any) *ToolResult 
 
 	result, err := t.manager.CallTool(ctx, t.serverName, t.tool.Name, args)
 	if err != nil {
-		t.publishRuntimeEvent(ctx, runtimeevents.KindMCPToolCallEnd, startedAt, true, err.Error())
-		return ErrorResult(fmt.Sprintf("MCP tool execution failed: %v", err)).WithError(err)
+		// Annotate the error so blank-cause SDK errors at least name the
+		// MCP surface that failed. Without this, an error like
+		// `failed to call tool: calling "tools/call": sending "tools/call":`
+		// gives no clue which server or tool was involved.
+		errMsg := err.Error()
+		annotated := fmt.Sprintf(
+			"MCP tool execution failed (server=%s, tool=%s): %v",
+			t.serverName, t.tool.Name, err,
+		)
+		// If the error chain ends with a trailing colon and no cause text,
+		// flag it explicitly so agents can react with "transport-level failure
+		// with no underlying cause" rather than narrating "Yaad failed".
+		trimmed := strings.TrimSpace(errMsg)
+		if strings.HasSuffix(trimmed, ":") {
+			annotated += " [blank-cause: transport-layer error with no underlying message — likely SDK swallowing or remote 5xx without body]"
+		}
+		t.publishRuntimeEvent(ctx, runtimeevents.KindMCPToolCallEnd, startedAt, true, annotated)
+		return ErrorResult(annotated).WithError(err)
 	}
 
 	if result == nil {

@@ -130,6 +130,16 @@ func NewPicoChannel(
 				return true
 			}
 		}
+		// Log the rejected origin so the upstream "WebSocket upgrade failed"
+		// error is actionable. Without this, the gorilla websocket error
+		// message ("websocket: request origin not allowed by Upgrader.CheckOrigin")
+		// gives no clue about which origin the browser actually sent.
+		logger.WarnCF("pico", "WebSocket origin rejected by CheckOrigin", map[string]any{
+			"origin":           origin,
+			"allowed_origins":  allowOrigins,
+			"remote_addr":      r.RemoteAddr,
+			"request_uri":      r.RequestURI,
+		})
 		return false
 	}
 

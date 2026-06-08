@@ -138,6 +138,24 @@ func (al *AgentLoop) ListDelegationRecords(
 	return out, nil
 }
 
+func (al *AgentLoop) ReclaimStaleDelegation(
+	ctx context.Context,
+	delegationID string,
+	reason string,
+	staleBefore time.Time,
+) (tools.DelegationRecord, error) {
+	if al == nil || al.delegationRecords == nil {
+		return tools.DelegationRecord{}, tools.ErrDelegationRecordNotFound
+	}
+	rec, err := al.delegationRecords.ReclaimStale(ctx, delegationID, reason, staleBefore)
+	if err != nil {
+		return tools.DelegationRecord{}, err
+	}
+	_ = al.persistDelegationMemory(context.Background(), rec.DelegationID)
+	al.publishDelegationBlockerSummary(context.Background(), rec, errors.New(reason))
+	return toolDelegationRecord(rec), nil
+}
+
 func normalizeDelegationQueryAgentID(agentID string) string {
 	if strings.TrimSpace(agentID) == "" {
 		return ""

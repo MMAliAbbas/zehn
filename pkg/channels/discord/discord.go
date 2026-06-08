@@ -38,19 +38,13 @@ const (
 	discordStateDisconnected uint32 = 2
 	discordStateInvalid      uint32 = 3 // server told us our session is invalid; usually fatal
 
-	// Liveness threshold: if more than this elapsed since the last event
-	// from Discord (heartbeat ack, gateway message, anything), HealthCheck
-	// returns false. discordgo sends heartbeat acks every ~41s, so 90s is
-	// "missed at least two heartbeats."
-	discordEventStalenessThreshold = 90 * time.Second
-
 	// Watchdog: if we observe state==Disconnected for this long AND
 	// haven't attempted a reconnect in the last reconnectAttemptCooldown,
 	// force a new session.Open(). discordgo has its own auto-reconnect, but
 	// it gives up under some conditions; this is the backstop.
-	watchdogReconnectAfter       = 30 * time.Second
-	reconnectAttemptCooldown     = 15 * time.Second
-	watchdogTickInterval         = 10 * time.Second
+	watchdogReconnectAfter   = 30 * time.Second
+	reconnectAttemptCooldown = 15 * time.Second
+	watchdogTickInterval     = 10 * time.Second
 )
 
 func discordStateName(s uint32) string {
@@ -98,9 +92,9 @@ type DiscordChannel struct {
 	ttsPlayID uint64
 
 	// Connection liveness tracking. All fields are accessed atomically.
-	connState           atomic.Uint32 // discordState* const
-	lastEventNanos      atomic.Int64  // unix nanos of last received gateway event
-	lastReconnectNanos  atomic.Int64  // unix nanos of last forced reconnect attempt
+	connState          atomic.Uint32 // discordState* const
+	lastEventNanos     atomic.Int64  // unix nanos of last received gateway event
+	lastReconnectNanos atomic.Int64  // unix nanos of last forced reconnect attempt
 }
 
 func NewDiscordChannel(
@@ -197,8 +191,10 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 	return nil
 }
 
-// markEvent records that we just received something from Discord. Called by
-// every event handler to drive HealthCheck staleness logic.
+// markEvent records that we just received an application-level gateway event
+// from Discord. The discordgo fork used here does not expose heartbeat ACKs
+// through AddHandler, so this timestamp is observability context only; it is
+// not a reliable idle-connection failure detector.
 func (c *DiscordChannel) markEvent() {
 	c.lastEventNanos.Store(time.Now().UnixNano())
 }
@@ -229,9 +225,9 @@ func (c *DiscordChannel) onResumed(_ *discordgo.Session, e *discordgo.Resumed) {
 }
 
 // HealthCheck implements the channels.LiveHealthChecker interface. It returns
-// false when the Discord session is not in a Connected state OR when no event
-// has arrived from Discord recently (suggesting heartbeats are silently
-// failing). When false, /ready returns 503 with the detail message.
+// false when the Discord session is not in a Connected state. last_event_age is
+// reported for observability only because an idle but healthy Discord bot may
+// receive no application-level events for long periods.
 func (c *DiscordChannel) HealthCheck() (bool, string) {
 	state := c.connState.Load()
 	lastEvent := c.lastEventNanos.Load()
@@ -243,9 +239,6 @@ func (c *DiscordChannel) HealthCheck() (bool, string) {
 	age := time.Since(time.Unix(0, lastEvent))
 	if state != discordStateConnected {
 		return false, "Discord state=" + discordStateName(state) + " last_event_age=" + age.String()
-	}
-	if age > discordEventStalenessThreshold {
-		return false, "Discord state=connected but last_event_age=" + age.String() + " (likely heartbeat failing)"
 	}
 	return true, "state=connected last_event_age=" + age.String()
 }
@@ -262,27 +255,17 @@ func (c *DiscordChannel) reconnectWatchdog(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			now := time.Now()
+			if !c.shouldForceReconnect(now) {
+				continue
+			}
 			state := c.connState.Load()
-			if state == discordStateConnected {
-				continue
-			}
-			// Check how long we've been disconnected. Use lastEventNanos as
-			// proxy: if we've recently received an event we're effectively
-			// connected even if a transient Disconnect handler fired.
 			lastEvent := c.lastEventNanos.Load()
-			if lastEvent > 0 && time.Since(time.Unix(0, lastEvent)) < watchdogReconnectAfter {
-				continue
-			}
-			// Check cooldown to avoid hammering Discord with Open() calls.
-			lastAttempt := c.lastReconnectNanos.Load()
-			if lastAttempt > 0 && time.Since(time.Unix(0, lastAttempt)) < reconnectAttemptCooldown {
-				continue
-			}
-			c.lastReconnectNanos.Store(time.Now().UnixNano())
+			c.lastReconnectNanos.Store(now.UnixNano())
 			logger.WarnCF("discord", "Reconnect watchdog forcing session.Open()",
 				map[string]any{
 					"state":          discordStateName(state),
-					"last_event_age": time.Since(time.Unix(0, lastEvent)).String(),
+					"last_event_age": discordEventAgeString(now, lastEvent),
 				})
 			if err := c.session.Open(); err != nil {
 				logger.ErrorCF("discord", "Reconnect watchdog session.Open() failed",
@@ -290,6 +273,31 @@ func (c *DiscordChannel) reconnectWatchdog(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (c *DiscordChannel) shouldForceReconnect(now time.Time) bool {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	state := c.connState.Load()
+	lastEvent := c.lastEventNanos.Load()
+	switch state {
+	case discordStateConnected:
+		return false
+	default:
+		if lastEvent > 0 && now.Sub(time.Unix(0, lastEvent)) < watchdogReconnectAfter {
+			return false
+		}
+	}
+	lastAttempt := c.lastReconnectNanos.Load()
+	return lastAttempt == 0 || now.Sub(time.Unix(0, lastAttempt)) >= reconnectAttemptCooldown
+}
+
+func discordEventAgeString(now time.Time, lastEvent int64) string {
+	if lastEvent == 0 {
+		return "never"
+	}
+	return now.Sub(time.Unix(0, lastEvent)).String()
 }
 
 func (c *DiscordChannel) Stop(ctx context.Context) error {

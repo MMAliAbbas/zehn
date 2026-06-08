@@ -187,6 +187,41 @@ func (s *DelegationRecordStore) Failed(ctx context.Context, delegationID string,
 	})
 }
 
+func (s *DelegationRecordStore) ReclaimStale(ctx context.Context, delegationID, reason string, staleBefore time.Time) (AgentDelegationRecord, error) {
+	if s == nil {
+		return AgentDelegationRecord{}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return AgentDelegationRecord{}, err
+	}
+	if reason = strings.TrimSpace(reason); reason == "" {
+		reason = "stale delegation reclaimed"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rec, err := s.getUnlocked(ctx, delegationID)
+	if err != nil {
+		return AgentDelegationRecord{}, err
+	}
+	if rec.Status != AgentDelegationStatusRunning || rec.UpdatedAt.IsZero() || staleBefore.IsZero() || !rec.UpdatedAt.Before(staleBefore) {
+		return AgentDelegationRecord{}, fmt.Errorf("%w: delegation %q is not running stale", ErrAgentDelegationInvalidRequest, delegationID)
+	}
+	now := s.now().UTC()
+	rec.Status = AgentDelegationStatusFailed
+	rec.CompletedAt = &now
+	rec.Result = nil
+	rec.Error = &AgentDelegationRecordError{
+		Message: s.redact(reason),
+		Type:    "stale_timeout",
+	}
+	rec.UpdatedAt = now
+	if err := s.writeUnlocked(rec); err != nil {
+		return AgentDelegationRecord{}, err
+	}
+	return rec, nil
+}
+
 func (s *DelegationRecordStore) RecordMemoryWrite(
 	ctx context.Context,
 	delegationID string,

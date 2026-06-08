@@ -20,6 +20,33 @@ func (r *fakeDelegationRecordReader) GetDelegationRecord(ctx context.Context, de
 	return DelegationRecord{}, ErrDelegationRecordNotFound
 }
 
+type fakeDelegationRecordReclaimer struct {
+	fakeDelegationRecordReader
+	reclaimedID     string
+	reclaimedReason string
+}
+
+func (r *fakeDelegationRecordReclaimer) ReclaimStaleDelegation(ctx context.Context, delegationID, reason string, staleBefore time.Time) (DelegationRecord, error) {
+	r.reclaimedID = delegationID
+	r.reclaimedReason = reason
+	for i, rec := range r.records {
+		if rec.DelegationID != delegationID {
+			continue
+		}
+		if rec.Status != "running" || rec.UpdatedAt.IsZero() || !rec.UpdatedAt.Before(staleBefore) {
+			return DelegationRecord{}, ErrDelegationRecordNotFound
+		}
+		rec.Status = "failed"
+		rec.Error = reason
+		now := time.Date(2026, 6, 8, 13, 30, 0, 0, time.UTC)
+		rec.CompletedAt = &now
+		rec.UpdatedAt = now
+		r.records[i] = rec
+		return rec, nil
+	}
+	return DelegationRecord{}, ErrDelegationRecordNotFound
+}
+
 func (r *fakeDelegationRecordReader) ListDelegationRecords(ctx context.Context, query DelegationRecordQuery) ([]DelegationRecord, error) {
 	var out []DelegationRecord
 	for _, rec := range r.records {
@@ -266,6 +293,100 @@ func TestDelegationStatusTool_ZehnMainCanInspectNestedDelegations(t *testing.T) 
 	}
 	if !strings.Contains(result.ForLLM, "delegation-nested") {
 		t.Fatalf("ForLLM missing nested delegation:\n%s", result.ForLLM)
+	}
+}
+
+func TestReclaimStaleDelegationTool_SupervisorFailsRunningStaleRecord(t *testing.T) {
+	startedAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
+	reclaimer := &fakeDelegationRecordReclaimer{
+		fakeDelegationRecordReader: fakeDelegationRecordReader{records: []DelegationRecord{
+			{
+				DelegationID:  "delegation-stale",
+				Status:        "running",
+				ParentAgentID: "zehn-main",
+				TargetAgentID: "li-ceo",
+				CreatedAt:     startedAt.Add(-25 * time.Hour),
+				UpdatedAt:     startedAt.Add(-24 * time.Hour),
+				Task:          "Run company operating cycle.",
+			},
+		}},
+	}
+	tool := NewReclaimStaleDelegationTool(reclaimer)
+	tool.startedAt = startedAt
+	ctx := WithToolSessionContext(context.Background(), "zehn-main", "session", nil)
+
+	result := tool.Execute(ctx, map[string]any{
+		"delegation_id": "delegation-stale",
+		"reason":        "heartbeat stale timeout after 24h",
+	})
+
+	if result.IsError {
+		t.Fatalf("Execute() returned error: %s", result.ForLLM)
+	}
+	if reclaimer.reclaimedID != "delegation-stale" {
+		t.Fatalf("reclaimed ID = %q, want delegation-stale", reclaimer.reclaimedID)
+	}
+	if !strings.Contains(reclaimer.reclaimedReason, "heartbeat stale timeout after 24h") {
+		t.Fatalf("reclaim reason = %q", reclaimer.reclaimedReason)
+	}
+	if !strings.Contains(result.ForLLM, "status=failed") {
+		t.Fatalf("ForLLM missing terminal failed status:\n%s", result.ForLLM)
+	}
+}
+
+func TestReclaimStaleDelegationTool_RejectsNonSupervisor(t *testing.T) {
+	startedAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
+	reclaimer := &fakeDelegationRecordReclaimer{
+		fakeDelegationRecordReader: fakeDelegationRecordReader{records: []DelegationRecord{
+			{
+				DelegationID:  "delegation-stale",
+				Status:        "running",
+				ParentAgentID: "zehn-main",
+				TargetAgentID: "li-ceo",
+				CreatedAt:     startedAt.Add(-25 * time.Hour),
+				UpdatedAt:     startedAt.Add(-24 * time.Hour),
+			},
+		}},
+	}
+	tool := NewReclaimStaleDelegationTool(reclaimer)
+	tool.startedAt = startedAt
+	ctx := WithToolSessionContext(context.Background(), "li-ceo", "session", nil)
+
+	result := tool.Execute(ctx, map[string]any{"delegation_id": "delegation-stale"})
+
+	if !result.IsError {
+		t.Fatalf("expected non-supervisor reclaim to fail, got: %s", result.ForLLM)
+	}
+	if reclaimer.reclaimedID != "" {
+		t.Fatalf("non-supervisor reclaimed %q", reclaimer.reclaimedID)
+	}
+}
+
+func TestReclaimStaleDelegationTool_RejectsFreshRunningRecord(t *testing.T) {
+	startedAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
+	reclaimer := &fakeDelegationRecordReclaimer{
+		fakeDelegationRecordReader: fakeDelegationRecordReader{records: []DelegationRecord{
+			{
+				DelegationID:  "delegation-fresh",
+				Status:        "running",
+				ParentAgentID: "zehn-main",
+				TargetAgentID: "li-ceo",
+				CreatedAt:     startedAt.Add(-10 * time.Minute),
+				UpdatedAt:     startedAt.Add(10 * time.Minute),
+			},
+		}},
+	}
+	tool := NewReclaimStaleDelegationTool(reclaimer)
+	tool.startedAt = startedAt
+	ctx := WithToolSessionContext(context.Background(), "zehn-main", "session", nil)
+
+	result := tool.Execute(ctx, map[string]any{"delegation_id": "delegation-fresh"})
+
+	if !result.IsError {
+		t.Fatalf("expected fresh delegation reclaim to fail, got: %s", result.ForLLM)
+	}
+	if reclaimer.reclaimedID != "" {
+		t.Fatalf("fresh delegation reclaimed %q", reclaimer.reclaimedID)
 	}
 }
 

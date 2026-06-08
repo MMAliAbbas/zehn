@@ -180,6 +180,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 		}
 		return fmt.Errorf("singleton check failed: %w", err)
 	}
+	removeLegacyGatewayPIDFile(homePath)
 	defer pid.RemovePidFile(homePath)
 	closeListeners := true
 	defer func() {
@@ -302,6 +303,18 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 			}
 		}
 	}
+}
+
+func removeLegacyGatewayPIDFile(homePath string) {
+	path := filepath.Join(homePath, "gateway.pid")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		logger.WarnCF("gateway", "Failed to remove legacy gateway.pid file", map[string]any{
+			"path":  path,
+			"error": err.Error(),
+		})
+		return
+	}
+	logger.DebugCF("gateway", "Removed legacy gateway.pid file", map[string]any{"path": path})
 }
 
 func preCheckConfig(cfg *config.Config) error {

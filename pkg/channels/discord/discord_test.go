@@ -104,6 +104,52 @@ func TestApplyDiscordProxy_FromEnvironment(t *testing.T) {
 	}
 }
 
+func TestReconnectWatchdogDoesNotReconnectConnectedIdleSession(t *testing.T) {
+	now := time.Date(2026, 6, 8, 13, 30, 0, 0, time.UTC)
+	ch := &DiscordChannel{}
+	ch.connState.Store(discordStateConnected)
+	ch.lastEventNanos.Store(now.Add(-24 * time.Hour).UnixNano())
+
+	if ch.shouldForceReconnect(now) {
+		t.Fatal("expected connected idle Discord session to stay under discordgo session management")
+	}
+}
+
+func TestHealthCheckAllowsConnectedIdleSession(t *testing.T) {
+	now := time.Now()
+	ch := &DiscordChannel{}
+	ch.connState.Store(discordStateConnected)
+	ch.lastEventNanos.Store(now.Add(-24 * time.Hour).UnixNano())
+
+	ok, detail := ch.HealthCheck()
+	if !ok {
+		t.Fatalf("expected connected idle Discord session to be ready, detail=%q", detail)
+	}
+}
+
+func TestReconnectWatchdogCooldownSuppressesReconnect(t *testing.T) {
+	now := time.Date(2026, 6, 8, 13, 30, 0, 0, time.UTC)
+	ch := &DiscordChannel{}
+	ch.connState.Store(discordStateDisconnected)
+	ch.lastEventNanos.Store(now.Add(-2 * watchdogReconnectAfter).UnixNano())
+	ch.lastReconnectNanos.Store(now.Add(-reconnectAttemptCooldown / 2).UnixNano())
+
+	if ch.shouldForceReconnect(now) {
+		t.Fatal("expected reconnect cooldown to suppress forced reconnect")
+	}
+}
+
+func TestReconnectWatchdogReconnectsDisconnectedSession(t *testing.T) {
+	now := time.Date(2026, 6, 8, 13, 30, 0, 0, time.UTC)
+	ch := &DiscordChannel{}
+	ch.connState.Store(discordStateDisconnected)
+	ch.lastEventNanos.Store(now.Add(-2 * watchdogReconnectAfter).UnixNano())
+
+	if !ch.shouldForceReconnect(now) {
+		t.Fatal("expected disconnected Discord session to require forced reconnect")
+	}
+}
+
 func TestHandleMessage_IgnoresSelfAuthoredMessages(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	ch := &DiscordChannel{

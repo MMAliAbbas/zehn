@@ -199,6 +199,20 @@ func TestShutdownGatewayClosesMessageBus(t *testing.T) {
 	}
 }
 
+func TestRemoveLegacyGatewayPIDFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gateway.pid")
+	if err := os.WriteFile(path, []byte("5197\n"), 0o600); err != nil {
+		t.Fatalf("write legacy pid file: %v", err)
+	}
+
+	removeLegacyGatewayPIDFile(dir)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("legacy gateway.pid still exists, err=%v", err)
+	}
+}
+
 func TestCreateHeartbeatHandlerReturnsNonOKResponsesAsVisibleAction(t *testing.T) {
 	al := agent.NewAgentLoop(
 		config.DefaultConfig(),

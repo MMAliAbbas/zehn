@@ -363,6 +363,9 @@ func registerSharedTools(
 		}
 		if delegationStatusEnabled {
 			agent.Tools.Register(tools.NewDelegationStatusTool(al))
+			if agentID == "zehn-main" || agentID == "heartbeat" || agentID == "cron" || agentID == "main" {
+				agent.Tools.Register(tools.NewReclaimStaleDelegationTool(al))
+			}
 		}
 		if meetingEnabled {
 			agent.Tools.Register(tools.NewMeetingTool(al))

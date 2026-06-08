@@ -179,6 +179,74 @@ func TestDelegationRecordStore_CancelledStatus(t *testing.T) {
 	}
 }
 
+func TestDelegationRecordStore_ReclaimStaleFailsRunningRecord(t *testing.T) {
+	store := NewDelegationRecordStore(t.TempDir(), nil)
+	startedAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return startedAt.Add(-24 * time.Hour) }
+	rec, err := store.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "zehn-main",
+		TargetAgentID: "li-ceo",
+		Task:          "Run company operating cycle.",
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+	if err := store.Running(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("Running() error = %v", err)
+	}
+	store.now = func() time.Time { return startedAt }
+
+	reclaimed, err := store.ReclaimStale(context.Background(), rec.DelegationID, "heartbeat stale timeout", startedAt)
+	if err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	if reclaimed.Status != AgentDelegationStatusFailed {
+		t.Fatalf("status = %q, want failed", reclaimed.Status)
+	}
+	if reclaimed.CompletedAt == nil {
+		t.Fatal("CompletedAt was not set")
+	}
+	if reclaimed.Error == nil || reclaimed.Error.Type != "stale_timeout" {
+		t.Fatalf("error = %#v, want stale_timeout", reclaimed.Error)
+	}
+}
+
+func TestDelegationRecordStore_ReclaimStaleRejectsFreshRecordWithoutTouchingUpdatedAt(t *testing.T) {
+	store := NewDelegationRecordStore(t.TempDir(), nil)
+	startedAt := time.Date(2026, 6, 8, 13, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return startedAt.Add(5 * time.Minute) }
+	rec, err := store.Requested(context.Background(), AgentDelegationRequest{
+		ParentAgentID: "zehn-main",
+		TargetAgentID: "li-ceo",
+		Task:          "Run company operating cycle.",
+	})
+	if err != nil {
+		t.Fatalf("Requested() error = %v", err)
+	}
+	if err := store.Running(context.Background(), rec.DelegationID); err != nil {
+		t.Fatalf("Running() error = %v", err)
+	}
+	before, err := store.Get(context.Background(), rec.DelegationID)
+	if err != nil {
+		t.Fatalf("Get() before error = %v", err)
+	}
+	store.now = func() time.Time { return startedAt.Add(10 * time.Minute) }
+
+	if _, err := store.ReclaimStale(context.Background(), rec.DelegationID, "too fresh", startedAt); err == nil {
+		t.Fatal("ReclaimStale() expected error for fresh record")
+	}
+	after, err := store.Get(context.Background(), rec.DelegationID)
+	if err != nil {
+		t.Fatalf("Get() after error = %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("UpdatedAt changed from %s to %s", before.UpdatedAt, after.UpdatedAt)
+	}
+	if after.Status != AgentDelegationStatusRunning {
+		t.Fatalf("status = %q, want running", after.Status)
+	}
+}
+
 func TestDelegationRecordStore_ListScopesByVisibleAgentAndTarget(t *testing.T) {
 	store := NewDelegationRecordStore(t.TempDir(), nil)
 	store.now = fixedDelegationClock(

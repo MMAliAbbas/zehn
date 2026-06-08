@@ -73,6 +73,11 @@ type DelegationRecordReader interface {
 	ListDelegationRecords(ctx context.Context, query DelegationRecordQuery) ([]DelegationRecord, error)
 }
 
+type StaleDelegationReclaimer interface {
+	DelegationRecordReader
+	ReclaimStaleDelegation(ctx context.Context, delegationID, reason string, staleBefore time.Time) (DelegationRecord, error)
+}
+
 type DelegationStatusTool struct {
 	reader    DelegationRecordReader
 	startedAt time.Time
@@ -205,6 +210,84 @@ func (t *DelegationInboxTool) Execute(ctx context.Context, args map[string]any) 
 		return NewToolResult("Delegation inbox is empty.")
 	}
 	return NewToolResult(formatDelegationRecords("Delegation inbox", records))
+}
+
+type ReclaimStaleDelegationTool struct {
+	reclaimer StaleDelegationReclaimer
+	startedAt time.Time
+}
+
+func NewReclaimStaleDelegationTool(reclaimer StaleDelegationReclaimer) *ReclaimStaleDelegationTool {
+	return &ReclaimStaleDelegationTool{
+		reclaimer: reclaimer,
+		startedAt: time.Now().UTC(),
+	}
+}
+
+func (t *ReclaimStaleDelegationTool) Name() string {
+	return "reclaim_stale_delegation"
+}
+
+func (t *ReclaimStaleDelegationTool) Description() string {
+	return "Supervisor-only recovery tool that marks a running stale delegation failed so a successor operating cycle can be launched without duplicating active work."
+}
+
+func (t *ReclaimStaleDelegationTool) Parameters() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"delegation_id": map[string]any{
+				"type":        "string",
+				"description": "Required stale delegation ID to reclaim.",
+			},
+			"reason": map[string]any{
+				"type":        "string",
+				"description": "Evidence-backed reason for reclaiming the stale delegation.",
+			},
+		},
+		"required": []string{"delegation_id"},
+	}
+}
+
+func (t *ReclaimStaleDelegationTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+	if t.reclaimer == nil {
+		return ErrorResult("reclaim_stale_delegation error: delegation reclaimer not configured")
+	}
+	callerAgentID := strings.TrimSpace(ToolAgentID(ctx))
+	if !delegationStatusSupervisorCanInspectAll(callerAgentID) {
+		return ErrorResult("reclaim_stale_delegation error: supervisor agent identity is required")
+	}
+	delegationID := stringArg(args, "delegation_id")
+	if delegationID == "" {
+		return ErrorResult("reclaim_stale_delegation error: delegation_id is required")
+	}
+	records, err := t.reclaimer.ListDelegationRecords(ctx, DelegationRecordQuery{
+		DelegationID:      delegationID,
+		VisibleToAgentID:  callerAgentID,
+		IncludePrivateAll: true,
+	})
+	if err != nil {
+		return ErrorResult("reclaim_stale_delegation error: delegation not found").WithError(err)
+	}
+	if len(records) == 0 {
+		return ErrorResult("reclaim_stale_delegation error: delegation not found")
+	}
+	rec := records[0]
+	if rec.Status != "running" {
+		return ErrorResult(fmt.Sprintf("reclaim_stale_delegation error: delegation status is %q, want running", rec.Status))
+	}
+	if t.startedAt.IsZero() || rec.UpdatedAt.IsZero() || !rec.UpdatedAt.Before(t.startedAt) {
+		return ErrorResult("reclaim_stale_delegation error: delegation is not stale relative to this runtime start")
+	}
+	reason := strings.TrimSpace(stringArg(args, "reason"))
+	if reason == "" {
+		reason = fmt.Sprintf("stale delegation reclaimed by %s after runtime restart at %s", callerAgentID, t.startedAt.Format(time.RFC3339))
+	}
+	reclaimed, err := t.reclaimer.ReclaimStaleDelegation(ctx, delegationID, reason, t.startedAt)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("reclaim_stale_delegation error: %v", err)).WithError(err)
+	}
+	return NewToolResult("Reclaimed stale delegation:\n" + formatDelegationRecord(reclaimed))
 }
 
 func delegationRecordVisibleToAgent(rec DelegationRecord, agentID string) bool {

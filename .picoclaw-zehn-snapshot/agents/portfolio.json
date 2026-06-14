@@ -1,0 +1,105 @@
+{
+  "bundles": [
+    {
+      "name": "SaaS Growth & Retention Suite",
+      "apps": [
+        "Churn Risk Signal Aggregator",
+        "Failed Payment Recovery Agent",
+        "SaaS Trial-to-Paid Conversion Agent",
+        "Feature Adoption Nudge Engine",
+        "Onboarding Completion Tracker",
+        "SaaS Pricing Page A/B Monitor"
+      ]
+    },
+    {
+      "name": "E-commerce Operations Suite",
+      "apps": [
+        "Vendor Price Increase Tracker",
+        "Dead Stock Liquidator",
+        "Collection Profit Sorter",
+        "Margin-Based Upsell Ranker",
+        "Shipping Profit Maximizer",
+        "Dynamic Profit Pricing",
+        "Return Fraud Pattern Detector",
+        "Ad Spend Auto-Governor",
+        "PriceWatch CI Monitor"
+      ]
+    },
+    {
+      "name": "Finance & Revenue Intelligence Suite",
+      "apps": [
+        "Expense Category Auto-Tagger",
+        "Invoice Payment Delay Predictor",
+        "Revenue Recognition Flag Engine",
+        "Subscription Overlap Detector",
+        "Freelancer Rate Benchmarker"
+      ]
+    },
+    {
+      "name": "Legal & Compliance Suite",
+      "apps": [
+        "Contract Auto-Renewal Alert System",
+        "AI Contract Risk Clause Scanner",
+        "ToS/Privacy Policy Change Monitor",
+        "AI Transparency Disclosure Generator",
+        "GDPR Data Request Auto-Responder",
+        "State Privacy Law Tracker",
+        "Tax Nexus Threshold Monitor",
+        "Dependency License Auditor",
+        "Employee Policy Update Broadcaster"
+      ]
+    },
+    {
+      "name": "Developer & DevOps Suite",
+      "apps": [
+        "API Deprecation Watchdog",
+        "Changelog-from-PR Generator",
+        "Error Budget Burn-Rate Alerter",
+        "SSL/Domain Expiry Guardian"
+      ]
+    },
+    {
+      "name": "Content & Marketing Suite",
+      "apps": [
+        "Blog-to-Social Thread Splitter",
+        "Podcast Show Notes Generator",
+        "Webinar-to-Content Pipeline",
+        "Case Study Draft Generator",
+        "Client Report Auto-Generator",
+        "Video Testimonial Clipper"
+      ]
+    },
+    {
+      "name": "HR & Workforce Suite",
+      "apps": [
+        "Candidate Screening Score Card",
+        "Interview Question Bank Generator",
+        "Job Description Bias Scanner",
+        "Timesheet Anomaly Detector"
+      ]
+    },
+    {
+      "name": "Professional Services Suite",
+      "apps": [
+        "Proposal Win/Loss Analyzer",
+        "Scope Creep Detector"
+      ]
+    },
+    {
+      "name": "Real Estate & Property Suite",
+      "apps": [
+        "Lease Renewal Deadline Tracker",
+        "Maintenance Request Triage Agent",
+        "Rental Comp Price Monitor"
+      ]
+    },
+    {
+      "name": "Education Suite",
+      "apps": [
+        "Course Completion Drop-Off Alerter",
+        "Student Engagement Decay Detector",
+        "Quiz & Assessment Auto-Grader"
+      ]
+    }
+  ]
+}

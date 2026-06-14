@@ -40,8 +40,9 @@ const (
 
 	// Watchdog: if we observe state==Disconnected for this long AND
 	// haven't attempted a reconnect in the last reconnectAttemptCooldown,
-	// force a new session.Open(). discordgo has its own auto-reconnect, but
-	// it gives up under some conditions; this is the backstop.
+	// close any stale websocket and force a new session.Open(). discordgo has
+	// its own auto-reconnect, but it gives up under some conditions; this is
+	// the backstop.
 	watchdogReconnectAfter   = 30 * time.Second
 	reconnectAttemptCooldown = 15 * time.Second
 	watchdogTickInterval     = 10 * time.Second
@@ -80,6 +81,7 @@ type DiscordChannel struct {
 	progress   *channels.ToolFeedbackAnimator
 	botUserID  string // stored for mention checking
 	bus        *bus.MessageBus
+	sessionMu  sync.Mutex
 	tts        tts.TTSProvider
 	playTTSFn  func(context.Context, *discordgo.VoiceConnection, string, uint64)
 	ttsVoiceFn func(string) (*discordgo.VoiceConnection, bool)
@@ -170,7 +172,10 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 
 	go c.listenVoiceControl(c.ctx)
 
-	if err := c.session.Open(); err != nil {
+	c.sessionMu.Lock()
+	err = c.session.Open()
+	c.sessionMu.Unlock()
+	if err != nil {
 		c.connState.Store(discordStateDisconnected)
 		return fmt.Errorf("failed to open discord session: %w", err)
 	}
@@ -243,10 +248,11 @@ func (c *DiscordChannel) HealthCheck() (bool, string) {
 	return true, "state=connected last_event_age=" + age.String()
 }
 
-// reconnectWatchdog periodically checks the Discord state and forces a new
-// session.Open() if we've been Disconnected too long. discordgo's built-in
-// auto-reconnect normally handles this, but it can give up under persistent
-// network failure; this is the backstop documented in the 2026-06-05 audit.
+// reconnectWatchdog periodically checks the Discord state and closes/reopens
+// the session if we've been Disconnected too long. discordgo's built-in
+// auto-reconnect normally handles this, but it can leave a stale websocket
+// after heartbeat ACK loss; this is the backstop documented in the 2026-06-05
+// audit and the 2026-06-13 readiness failure.
 func (c *DiscordChannel) reconnectWatchdog(ctx context.Context) {
 	ticker := time.NewTicker(watchdogTickInterval)
 	defer ticker.Stop()
@@ -262,16 +268,32 @@ func (c *DiscordChannel) reconnectWatchdog(ctx context.Context) {
 			state := c.connState.Load()
 			lastEvent := c.lastEventNanos.Load()
 			c.lastReconnectNanos.Store(now.UnixNano())
-			logger.WarnCF("discord", "Reconnect watchdog forcing session.Open()",
+			logger.WarnCF("discord", "Reconnect watchdog forcing Discord session reconnect",
 				map[string]any{
 					"state":          discordStateName(state),
 					"last_event_age": discordEventAgeString(now, lastEvent),
 				})
-			if err := c.session.Open(); err != nil {
-				logger.ErrorCF("discord", "Reconnect watchdog session.Open() failed",
-					map[string]any{"error": err.Error()})
-			}
+			c.forceSessionReconnect()
 		}
+	}
+}
+
+func (c *DiscordChannel) forceSessionReconnect() {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+
+	if c.connState.Load() == discordStateConnected {
+		return
+	}
+	c.connState.Store(discordStateConnecting)
+	if err := c.session.Close(); err != nil {
+		logger.WarnCF("discord", "Reconnect watchdog session.Close() failed",
+			map[string]any{"error": err.Error()})
+	}
+	if err := c.session.Open(); err != nil {
+		c.connState.Store(discordStateDisconnected)
+		logger.ErrorCF("discord", "Reconnect watchdog session.Open() failed",
+			map[string]any{"error": err.Error()})
 	}
 }
 
@@ -320,7 +342,10 @@ func (c *DiscordChannel) Stop(ctx context.Context) error {
 		c.progress.StopAll()
 	}
 
-	if err := c.session.Close(); err != nil {
+	c.sessionMu.Lock()
+	err := c.session.Close()
+	c.sessionMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("failed to close discord session: %w", err)
 	}
 
